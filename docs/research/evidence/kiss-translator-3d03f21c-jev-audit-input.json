@@ -1,0 +1,35 @@
+{
+  "task": "Audit individual source/evidence relations in pinned kiss-translator. These are integration assumptions, not an overall safety or completion verdict. Judge executable code, not praise or REVIEW comments.",
+  "checks": [
+    {
+      "id": "seek",
+      "source": "research-sources/kiss-translator/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/BilingualSubtitleManager.js:449-461",
+      "claim": "Seeking aborts all in-flight translation HTTP requests in these handlers.",
+      "evidence": "  onSeeking() {\n    this.#throttledTriggerTranslations.cancel(); // 暂停预翻译，防止产生大量断续的无效预翻译网络请求\n    // 强制高亮展示对应处的字幕，且不在此触发翻译\n    this.#syncToCurrentTime({ forceRender: true, triggerTranslations: false });\n  }\n\n  /**\n   * 进度条拖动完毕，落定后触发\n   */\n  onSeek() {\n    this.#throttledTriggerTranslations.cancel();\n    this.#syncToCurrentTime({ forceRender: true });\n    this.#scheduleSeekSettledSync(); // 调度下一帧做一次确认位置同步"
+    },
+    {
+      "id": "render",
+      "source": "research-sources/kiss-translator/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/BilingualSubtitleManager.js:580-601",
+      "claim": "Translation-only mode retains the original text while translation is missing.",
+      "evidence": "      // 2. 创建字幕译文 (translation) 显示节点\n      const p2 = document.createElement(\"p\");\n      p2.style.cssText = this.#setting.translationStyle;\n      p2.style.margin = \"0\";\n      if (isHoverLookupEnabled) {\n        p2.innerHTML = trustedTypesHelper.createHTML(\n          wrapWordsWithSpans(subtitle.translation || \"...\")\n        );\n      } else {\n        p2.textContent = truncateWords(subtitle.translation) || \"...\";\n      }\n\n      // 3. 根据用户设置，决定显示双语对照还是仅显示翻译\n      if (this.#setting.isBilingual) {\n        const children =\n          this.#setting.displayOrder === \"translation-first\"\n            ? [p2, p1]\n            : [p1, p2];\n        this.#captionWindowEl.replaceChildren(...children);\n      } else {\n        this.#captionWindowEl.replaceChildren(p2);\n      }"
+    },
+    {
+      "id": "signal",
+      "source": "research-sources/kiss-translator/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/libs/batchQueue.js:87-124",
+      "claim": "The shown batch execution passes only the first queued task args to the batch function, so it does not independently pass each task cancellation signal.",
+      "evidence": "    try {\n      const payloads = tasksToProcess.map((item) => item.payload);\n      const batchArgs = tasksToProcess[0].args;\n\n      // 调用具体的翻译函数（可能返回 AsyncGenerator 或 Promise）\n      const generator = taskFn(payloads, batchArgs);\n\n      // 检查是否是异步生成器（用于流式逐句返回结果的翻译源，如 OpenAI/Gemini）\n      if (generator && typeof generator[Symbol.asyncIterator] === \"function\") {\n        for await (const item of generator) {\n          const id = item.id;\n          const isComplete = item.isComplete !== false; // 默认完成状态为 true\n          const taskItem = tasksToProcess[id];\n\n          if (taskItem) {\n            // 流式渲染的中间状态回调（当 isComplete 为 false 且有分块回调时）\n            if (!isComplete && taskItem.args?.onStreamChunk) {\n              taskItem.args.onStreamChunk({\n                id,\n                text: item.partialText,\n                isComplete: false,\n              });\n            }\n            // 单个段落完全翻译结束：触发回调并 resolve 对应任务的 Promise\n            if (isComplete) {\n              if (taskItem.args?.onStreamChunk) {\n                taskItem.args.onStreamChunk({\n                  id,\n                  text: item.result,\n                  isComplete: true,\n                });\n              }\n              if (!taskItem.resolved) {\n                taskItem.resolved = true;\n                taskItem.resolve(item.result);\n              }\n            }\n          }"
+    },
+    {
+      "id": "cache",
+      "source": "research-sources/kiss-translator/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/apis/index.js:105-140",
+      "claim": "The displayed prompt signature incorporates the configured service endpoint and model.",
+      "evidence": "function getPromptCacheFields(apiSetting = {}, promptScope, glossary = {}) {\n  let fields = [];\n\n  if (promptScope === PROMPT_CACHE_SCOPE_BATCH) {\n    fields = [apiSetting.systemPrompt || \"\"];\n  } else if (promptScope === PROMPT_CACHE_SCOPE_NOBATCH) {\n    fields = [\n      apiSetting.nobatchPrompt || \"\",\n      apiSetting.nobatchUserPrompt ?? defaultNobatchUserPrompt,\n    ];\n  } else if (promptScope === PROMPT_CACHE_SCOPE_DICT) {\n    return [\n      apiSetting.dictPrompt || \"\",\n      apiSetting.dictUserPrompt ?? defaultDictUserPrompt,\n    ];\n  } else if (promptScope === PROMPT_CACHE_SCOPE_QWEN_MT) {\n    fields = [];\n  } else {\n    return [];\n  }\n\n  fields.push(apiSetting.tone || \"\", apiSetting.aiTerms || \"\");\n  const glossaryEntries = Object.entries(glossary || {}).sort();\n  if (glossaryEntries.length) {\n    fields.push(JSON.stringify(glossaryEntries));\n  }\n  return fields;\n}\n\nasync function getPromptCacheSig(apiSetting = {}, promptScope, glossary) {\n  const promptText = [\n    promptScope,\n    ...getPromptCacheFields(apiSetting, promptScope, glossary),\n  ].join(\"\\n\");\n\n  return (await getCacheDigest(promptText, PROMPT_CACHE_SALT)).slice(0, 16);"
+    },
+    {
+      "id": "destroy",
+      "source": "research-sources/kiss-translator/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/BilingualSubtitleManager.js:99-121",
+      "claim": "Destroy invalidates translation session identity and aborts its controller before clearing subtitles.",
+      "evidence": "  destroy() {\n    logger.info(\"Bilingual Subtitle Manager: Destroying...\");\n    this.#translationSessionId += 1; // 递增会话 ID，使当前在途的异步请求回调全部失效\n    this.#abortController?.abort(); // 中止未返回的底层请求\n    this.#abortController = null;\n    this.onSubtitleUpdate = null;\n    this.#removeEventListeners(); // 解绑视频播放监听\n    this.#throttledTriggerTranslations?.cancel(); // 取消节流触发器\n    if (this.#seekSyncRafId !== null) {\n      cancelAnimationFrame(this.#seekSyncRafId);\n      this.#seekSyncRafId = null;\n    }\n    // 移除字幕渲染容器\n    this.#captionWindowEl?.parentElement?.parentElement?.remove();\n    // 释放 MutationObserver 监听器\n    this.#playerControlBarObserver?.disconnect();\n    this.#playerControlBarObserver = null;\n    this.#playerResizeObserver?.disconnect();\n    this.#playerResizeObserver = null;\n    this.#syncPaperBottomAfterDrag = null;\n    this.#syncPaperPosition = null;\n    this.#formattedSubtitles = [];\n    this.#wordTooltipController?.destroy();"
+    }
+  ]
+}

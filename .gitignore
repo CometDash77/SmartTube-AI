@@ -62,6 +62,8 @@ logcat.txt
 /other
 /TODO.txt
 tmp/
+# Pinned third-party research archives and extracted source (not build inputs)
+/research-sources/
 *_bak*
 *_tmp
 *.bak*

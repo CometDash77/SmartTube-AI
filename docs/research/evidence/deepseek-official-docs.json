@@ -1,0 +1,18 @@
+{
+  "sources": [
+    {
+      "url": "https://api-docs.deepseek.com/api/create-chat-completion",
+      "retrieved_date": "2026-09-19",
+      "sha256": "94b97d795830f25025746b5dd9f7fc0d165ddced6c70bec3117823b1281e8b0a",
+      "local_ignored_capture": "tmp/research/deepseek/chat.html"
+    },
+    {
+      "url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "retrieved_date": "2026-09-19",
+      "sha256": "0deb524104f42d2a2d0b7f9fa0f7e8050fd4c81570453225583a63a6bf71bf8b",
+      "local_ignored_capture": "tmp/research/deepseek/models.html"
+    }
+  ],
+  "method": "Direct HTTPS retrieval after web tool provider error",
+  "live_api_call_performed": false
+}

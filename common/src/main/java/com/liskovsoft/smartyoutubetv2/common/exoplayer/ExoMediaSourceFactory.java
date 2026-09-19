@@ -43,6 +43,9 @@ import com.liskovsoft.sharedutils.okhttp.OkHttpManager;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.errors.DashDefaultLoadErrorHandlingPolicy;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.errors.SabrDefaultLoadErrorHandlingPolicy;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.errors.TrackErrorFixer;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleFormatCandidate;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleManifestAdapter;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSourceBinder;
 import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerTweaksData;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.googlecommon.common.helpers.DefaultHeaders;
@@ -67,6 +70,7 @@ public class ExoMediaSourceFactory {
     private static final boolean USE_BANDWIDTH_METER = false;
     private TrackErrorFixer mTrackErrorFixer;
     private DataSource.Factory mMediaDataSourceFactory;
+    private SubtitleSourceBinder mSubtitleSourceBinder;
 
     public ExoMediaSourceFactory(Context context) {
         mContext = context;
@@ -180,13 +184,16 @@ public class ExoMediaSourceFactory {
     }
 
     private MediaSource buildSabrMediaSource(MediaItemFormatInfo formatInfo) {
+        SabrManifest manifest = getSabrManifest(formatInfo);
+        bindSubtitleSources(formatInfo, SubtitleManifestAdapter.fromSabrManifest(manifest));
+
         // Are you using FrameworkSampleSource or ExtractorSampleSource when you build your player?
         SabrMediaSource sabrSource = new SabrMediaSource.Factory(
                 getSabrChunkSourceFactory(),
                 null
         )
                 .setLoadErrorHandlingPolicy(new SabrDefaultLoadErrorHandlingPolicy())
-                .createMediaSource(getSabrManifest(formatInfo));
+                .createMediaSource(manifest);
         if (mTrackErrorFixer != null) {
             sabrSource.addEventListener(Utils.sHandler, mTrackErrorFixer);
         }
@@ -194,13 +201,16 @@ public class ExoMediaSourceFactory {
     }
 
     private MediaSource buildDashMediaSource(MediaItemFormatInfo formatInfo) {
+        DashManifest manifest = getManifest(formatInfo);
+        bindSubtitleSources(formatInfo, SubtitleManifestAdapter.fromDashManifest(manifest));
+
         // Are you using FrameworkSampleSource or ExtractorSampleSource when you build your player?
         DashMediaSource dashSource = new DashMediaSource.Factory(
                 getDashChunkSourceFactory(),
                 null
         )
                 .setLoadErrorHandlingPolicy(new DashDefaultLoadErrorHandlingPolicy())
-                .createMediaSource(getManifest(formatInfo));
+                .createMediaSource(manifest);
         if (mTrackErrorFixer != null) {
             dashSource.addEventListener(Utils.sHandler, mTrackErrorFixer);
         }
@@ -308,6 +318,17 @@ public class ExoMediaSourceFactory {
         return dataSourceFactory;
     }
 
+    /**
+     * Binds the text representations of the manifest that is really being used to the source entries
+     * of the same request. A source built without an explicit format info (raw XML, plain MPD URL,
+     * HLS, url list) leaves the binding untouched; the controller clears the previous session first.
+     */
+    private void bindSubtitleSources(MediaItemFormatInfo formatInfo, List<SubtitleFormatCandidate> candidates) {
+        if (mSubtitleSourceBinder != null && formatInfo != null) {
+            mSubtitleSourceBinder.bind(formatInfo.getSubtitles(), candidates);
+        }
+    }
+
     private static void addCommonHeaders(HttpDataSource.Factory dataSourceFactory) {
         // Doesn't work
         // Trying to fix 429 error (too many requests)
@@ -348,6 +369,10 @@ public class ExoMediaSourceFactory {
 
     public void setTrackErrorFixer(TrackErrorFixer trackErrorFixer) {
         mTrackErrorFixer = trackErrorFixer;
+    }
+
+    public void setSubtitleSourceBinder(SubtitleSourceBinder subtitleSourceBinder) {
+        mSubtitleSourceBinder = subtitleSourceBinder;
     }
 
     public void release() {

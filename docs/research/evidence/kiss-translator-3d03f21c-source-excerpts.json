@@ -1,0 +1,82 @@
+{
+  "commit": "3d03f21c50536d67a5ca457e0181f8cd4911b781",
+  "evidence": [
+    {
+      "source": "src/hooks/Subtitle.js",
+      "start": 8,
+      "end": 15,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/hooks/Subtitle.js#L8-L15",
+      "text": "export function useSubtitle() {\n  const { setting, updateChild } = useSetting();\n  // 获取当前字幕的设置数据，若未设置则加载系统预设的默认值\n  const subtitleSetting = setting?.subtitleSetting || DEFAULT_SUBTITLE_SETTING;\n  // 生成专门用于修改全局配置中 subtitleSetting 分支的原子更新方法\n  const updateSubtitle = updateChild(\"subtitleSetting\");\n\n  return { subtitleSetting, updateSubtitle };"
+    },
+    {
+      "source": "src/subtitle/subtitle.js",
+      "start": 44,
+      "end": 80,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/subtitle.js#L44-L80",
+      "text": "    const subtitleSetting = setting.subtitleSetting || DEFAULT_SUBTITLE_SETTING;\n\n    // 如果用户在设置中关闭了视频双语字幕翻译功能，则不执行任何后续操作，直接返回\n    if (!subtitleSetting.enabled) {\n      return;\n    }\n\n    // 根据当前网页 URL (href) 查找是否有匹配的字幕服务提供商（例如匹配 YouTube 网址）\n    const provider = providers.find((item) => isMatch(href, item.pattern));\n    if (provider) {\n      // 1. 注入底层的劫持脚本 (INJECTOR.subtitle)\n      // 该操作会在原生页面环境中动态注入一段 JS 脚本，用以劫持底层的 XHR (XMLHttpRequest) 请求。\n      // 这对于拦截 YouTube 的 timedtext 异步字幕请求并将其回传给当前扩展至关重要。\n      const id = \"kiss-translator-inject-subtitle-js\";\n      injectJs(INJECTOR.subtitle, id);\n\n      // 2. 获取当前字幕翻译所关联的翻译 API 配置 (apiSetting)\n      const transApis = setting.transApis || [];\n      const enabledTransApis = transApis.filter((api) => !api.isDisabled);\n      const apiSetting =\n        enabledTransApis.find(\n          (api) => api.apiSlug === subtitleSetting.apiSlug\n        ) ||\n        enabledTransApis[0] ||\n        DEFAULT_API_SETTING;\n\n      // 3. 启动特定平台的字幕翻译与渲染引擎 (如 YouTubeCaptionProvider)\n      // 将整理好的字幕配置、翻译 API 配置、所有已启用的 API 列表以及 UI 界面语言传递给对应的 provider\n      provider.start({\n        ...subtitleSetting,\n        apiSlug: apiSetting.apiSlug,\n        apiSetting,\n        transApis,\n        prompts: setting.prompts,\n        uiLang: setting.uiLang,\n        translateVariants: setting.translateVariants ?? true,\n        parseLatex: setting.parseLatex ?? false,"
+    },
+    {
+      "source": "src/subtitle/youtubeCaptionTracks.js",
+      "start": 90,
+      "end": 124,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/youtubeCaptionTracks.js#L90-L124",
+      "text": "  // 优先匹配用户选择的字幕轨（语言 + kind 完全一致）。\n  // 手动字幕没有 kind 字段，统一转成 null，避免 undefined !== null 导致无法匹配。\n  let captionTrack = captionTracks.find(\n    (item) =>\n      item.languageCode === lang && (item.kind || null) === (kind || null)\n  );\n  if (!captionTrack) {\n    captionTrack = captionTracks.find((item) => item.languageCode === lang);\n  }\n  if (!captionTrack) {\n    const asrTrack = captionTracks.find((item) => item.kind === \"asr\");\n    if (asrTrack) {\n      captionTrack = captionTracks.find(\n        (item) =>\n          item.kind !== \"asr\" &&\n          isSameLang(item.languageCode, asrTrack.languageCode)\n      );\n      if (!captionTrack) {\n        captionTrack = asrTrack;\n      }\n    }\n  }\n\n  if (!captionTrack) {\n    // Keep cached track metadata immutable.\n    captionTrack = captionTracks[captionTracks.length - 1];\n  }\n\n  // Chat/弹幕字幕轨道自动降级为正常字幕轨道。\n  if (captionTrack && isChatCaptionTrack(captionTrack)) {\n    logger.debug(\n      \"Youtube Provider: detected chat subtitle track, switching to normal subtitle\"\n    );\n\n    const nonChatSameLang = captionTracks.find("
+    },
+    {
+      "source": "src/subtitle/subtitleBoundaryProtocol.js",
+      "start": 29,
+      "end": 59,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/subtitleBoundaryProtocol.js#L29-L59",
+      "text": "export function mapBoundaryItemToCue(\n  item,\n  events,\n  nextIndex,\n  fromLang = \"auto\"\n) {\n  const endIndex = Number(item?.e ?? item?.end_id);\n  if (\n    !Number.isInteger(endIndex) ||\n    !Number.isInteger(nextIndex) ||\n    nextIndex < 0 ||\n    endIndex < nextIndex ||\n    endIndex >= events.length\n  ) {\n    return null;\n  }\n\n  const text = mergeSubtitleEventText(events, nextIndex, endIndex, fromLang);\n  if (!text) return null;\n  const translation = isOnlyNonSpeechSubtitle(text)\n    ? text\n    : String(item?.t ?? item?.translation ?? \"\");\n\n  return {\n    start: events[nextIndex].start,\n    end: events[endIndex].end,\n    text,\n    translation,\n    _si: nextIndex,\n    _ei: endIndex,\n  };"
+    },
+    {
+      "source": "src/apis/trans.js",
+      "start": 279,
+      "end": 317,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/apis/trans.js#L279-L317",
+      "text": "export const detectSubtitleProtocol = (prompt = \"\") => {\n  const normalizedPrompt = String(prompt);\n  if (/WEBVTT|MM:SS\\.mmm|-->/i.test(normalizedPrompt)) return \"vtt-legacy\";\n  if (/\\{\\s*[\"']?s[\"']?\\s*:/.test(normalizedPrompt)) return \"index-v1\";\n\n  // 自定义提示词明确描述旧 p 等级时继续发送原结构，避免静默破坏已有配置。\n  const mentionsQuotedP = /[\"'`]p[\"'`]/i.test(normalizedPrompt);\n  const mentionsPauseLevel = /pause\\s+levels?|停顿等级|暫停等級/i.test(\n    normalizedPrompt\n  );\n  if (mentionsQuotedP && mentionsPauseLevel) return \"boundary-v2\";\n  return \"boundary-v3\";\n};\n\n/** 将播放器事件压缩成发送给 AI 的稳定索引 JSON 结构。 */\nexport const formatIndexSubtitleEvents = (events, prompt = \"\") => {\n  const protocol = detectSubtitleProtocol(prompt);\n  const usesLegacyPauseLevel =\n    protocol === \"boundary-v2\" ||\n    protocol === \"index-v1\" ||\n    protocol === \"vtt-legacy\";\n\n  return events.map((e, i) => {\n    const item = { id: i, text: e.text };\n    if (usesLegacyPauseLevel && i > 0) {\n      const p = getPauseLevel(e.start - events[i - 1].end);\n      if (p) item.p = p;\n    } else if (!usesLegacyPauseLevel && i < events.length - 1) {\n      // pauseMs 挂在停顿前的事件上，可直接作为该事件成为句末的边界提示。\n      const pauseMs = Math.round(events[i + 1].start - e.end);\n      if (pauseMs > 0) item.pauseMs = pauseMs;\n    }\n    return item;\n  });\n};\n\nconst usesIndexSubtitleInput = (prompt = \"\") => {\n  // 只有明确声明 VTT 的旧提示词继续接收旧结构；其余字幕请求统一使用纯索引 JSON。\n  return detectSubtitleProtocol(prompt) !== \"vtt-legacy\";"
+    },
+    {
+      "source": "src/apis/trans.js",
+      "start": 343,
+      "end": 362,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/apis/trans.js#L343-L362",
+      "text": "const parseIndexSubtitleRes = (raw, events, fromLang = \"auto\") => {\n  // 对齐器只建一次词表：buildResult 在截断修复兜底时可能执行两次。\n  const aligner = createSubtitleIndexAligner(events);\n  const buildResult = (data) => {\n    if (!Array.isArray(data) || !data.length) return null;\n    const legacyItems = data.map(isLegacyIndexSubtitleItem);\n    // 同一响应混用新旧协议会使游标语义不明确，直接交给尾部恢复逻辑处理。\n    if (legacyItems.some(Boolean) && !legacyItems.every(Boolean)) return null;\n\n    if (!legacyItems[0]) {\n      const result = [];\n      let nextIndex = 0;\n      for (const item of data) {\n        const cue = mapBoundaryItemToCue(item, events, nextIndex, fromLang);\n        // 新协议一旦出现非法边界，停止接收后续对象，保留已验证的连续前缀。\n        if (!cue) break;\n        result.push(cue);\n        nextIndex = cue._ei + 1;\n      }\n      return result.length ? result : null;"
+    },
+    {
+      "source": "src/libs/batchQueue.js",
+      "start": 53,
+      "end": 92,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/libs/batchQueue.js#L53-L92",
+      "text": "    // 如果队列为空或已经达到批次并发上限，则直接返回\n    if (queue.length === 0 || activeBatchCount >= concurrency) {\n      return;\n    }\n\n    activeBatchCount++;\n\n    let tasksToProcess = [];\n    let currentBatchLength = 0;\n    let endIndex = 0;\n\n    // 贪心策略：根据 batchSize 和字符长度 batchLength 计算本批次可以打包执行的任务范围\n    for (const task of queue) {\n      const textLength = task.payload?.length || 0;\n      if (\n        endIndex >= batchSize ||\n        (currentBatchLength + textLength > batchLength && endIndex > 0)\n      ) {\n        break;\n      }\n      currentBatchLength += textLength;\n      endIndex++;\n    }\n\n    // 从全局队列中截取要处理的任务\n    if (endIndex > 0) {\n      tasksToProcess = queue.splice(0, endIndex);\n    }\n\n    if (tasksToProcess.length === 0) {\n      activeBatchCount--;\n      return;\n    }\n\n    try {\n      const payloads = tasksToProcess.map((item) => item.payload);\n      const batchArgs = tasksToProcess[0].args;\n\n      // 调用具体的翻译函数（可能返回 AsyncGenerator 或 Promise）\n      const generator = taskFn(payloads, batchArgs);"
+    },
+    {
+      "source": "src/subtitle/BilingualSubtitleManager.js",
+      "start": 449,
+      "end": 474,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/BilingualSubtitleManager.js#L449-L474",
+      "text": "  onSeeking() {\n    this.#throttledTriggerTranslations.cancel(); // 暂停预翻译，防止产生大量断续的无效预翻译网络请求\n    // 强制高亮展示对应处的字幕，且不在此触发翻译\n    this.#syncToCurrentTime({ forceRender: true, triggerTranslations: false });\n  }\n\n  /**\n   * 进度条拖动完毕，落定后触发\n   */\n  onSeek() {\n    this.#throttledTriggerTranslations.cancel();\n    this.#syncToCurrentTime({ forceRender: true });\n    this.#scheduleSeekSettledSync(); // 调度下一帧做一次确认位置同步\n  }\n\n  // 通过两轮 requestAnimationFrame 确认视频底层解码已经落定，执行再次字幕位置校正，防止偶发性的字幕延迟错位\n  #scheduleSeekSettledSync() {\n    if (typeof requestAnimationFrame !== \"function\") return;\n    if (this.#seekSyncRafId !== null) {\n      cancelAnimationFrame(this.#seekSyncRafId);\n    }\n    this.#seekSyncRafId = requestAnimationFrame(() => {\n      this.#seekSyncRafId = requestAnimationFrame(() => {\n        this.#seekSyncRafId = null;\n        this.#syncToCurrentTime({ forceRender: true });\n      });"
+    },
+    {
+      "source": "src/subtitle/BilingualSubtitleManager.js",
+      "start": 632,
+      "end": 658,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/subtitle/BilingualSubtitleManager.js#L632-L658",
+      "text": "  #triggerTranslations(currentTimeMs) {\n    const { preTrans = 90 } = this.#setting;\n    const endTimeMs = currentTimeMs + preTrans * 1000;\n    const subs = this.#formattedSubtitles;\n\n    // 使用二分法定位到当前播放时间对应的起始字幕索引，避免在长字幕列表中进行全量 for 检索\n    let lo = 0,\n      hi = subs.length - 1,\n      startIdx = subs.length;\n    while (lo <= hi) {\n      const mid = (lo + hi) >>> 1;\n      if (subs[mid].end >= currentTimeMs) {\n        startIdx = mid;\n        hi = mid - 1;\n      } else {\n        lo = mid + 1;\n      }\n    }\n\n    // 从当前索引开始往后扫描，将未来 90 秒内尚未发起翻译的字幕抛入异步队列执行翻译与缓存\n    for (let i = startIdx; i < subs.length; i++) {\n      const sub = subs[i];\n      if (sub.start > endTimeMs) break; // 超出了预翻译时间窗口，退出扫描\n      if ((!sub.translation || sub._isDraftTranslation) && !sub.isTranslating) {\n        this.#translateAndStore(sub);\n      }\n    }"
+    },
+    {
+      "source": "src/apis/index.js",
+      "start": 733,
+      "end": 750,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/apis/index.js#L733-L750",
+      "text": "  const [v1, v2] = process.env.REACT_APP_VERSION.split(\".\");\n  const promptSig = await getPromptCacheSig(\n    apiSetting,\n    getTranslatePromptCacheScope(apiSetting),\n    glossary\n  );\n  const cacheOpts = {\n    apiSlug,\n    text,\n    fromLang,\n    toLang,\n    textFormat,\n    translateVariants,\n    version: [v1, v2].join(\".\"),\n    promptSig,\n    ...(docInfo?.summary && { ctx: docInfo.summary.slice(0, 50) }),\n  };\n  const cacheInput = `${URL_CACHE_TRAN}?${queryString.stringify(cacheOpts)}`;"
+    },
+    {
+      "source": "src/apis/index.js",
+      "start": 804,
+      "end": 824,
+      "url": "https://github.com/fishjar/kiss-translator/blob/3d03f21c50536d67a5ca457e0181f8cd4911b781/src/apis/index.js#L804-L824",
+      "text": "    const key = `${apiSlug}_${fromLang}_${toLang}_${textFormat}_${enableStream ? \"stream\" : \"batch\"}_${promptSig}_${effectiveBatchConcurrency}`;\n    const queue = getBatchQueue(key, handleTranslate, {\n      batchInterval,\n      batchSize,\n      batchLength,\n      batchConcurrency: effectiveBatchConcurrency,\n    });\n\n    translation = await queue.addTask(text, {\n      from,\n      to,\n      fromLang,\n      toLang,\n      langMap,\n      glossary,\n      textFormat,\n      apiSetting,\n      usePool,\n      onStreamChunk,\n      docInfo,\n      signal,"
+    }
+  ]
+}

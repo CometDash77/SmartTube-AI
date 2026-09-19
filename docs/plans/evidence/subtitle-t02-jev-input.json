@@ -1,0 +1,53 @@
+{
+  "task": "Implement the SmartTube AI subtitle plan (T01/T02): bind the actually selected subtitle track to its exact source, prove the original-cue baseline, and design the single write entry to SubtitleView. Decide for each claim whether the quoted evidence supports it, contradicts it, or is insufficient.",
+  "checks": [
+    {
+      "id": "format-identity",
+      "source": "exoplayer-amzn-2.10.6/library/dash/src/main/java/com/google/android/exoplayer2/source/dash/DashMediaPeriod.java:600,610; exoplayer-amzn-2.10.6/library/sabr/src/main/java/com/google/android/exoplayer2/source/sabr/SabrMediaPeriod.java:370,380; common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/selector/TrackSelectorManager.java:196-202",
+      "claim": "The subtitle Format instance created while parsing the manifest reaches the selected MediaTrack as the same object, so an identity map keyed by Format, built from the manifest the player really uses, binds the actually selected track.",
+      "evidence": "DashMediaPeriod.buildPrimaryAndEmbeddedTrackGroupInfos:\n  formats[j] = representations.get(j).format;   // line 600\n  trackGroups[primaryTrackGroupIndex] = new TrackGroup(formats);  // line 610\nSabrMediaPeriod (identical shape):\n  formats[j] = representations.get(j).format;   // line 370\n  trackGroups[primaryTrackGroupIndex] = new TrackGroup(formats);  // line 380\nTrackSelectorManager.initMediaTracks:\n  for (int trackIndex = 0; trackIndex < group.length; trackIndex++) {\n      Format format = group.getFormat(trackIndex);\n      MediaTrack mediaTrack = MediaTrack.forRendererIndex(rendererIndex);\n      mediaTrack.format = format;\n      mediaTrack.groupIndex = groupIndex;\n      mediaTrack.trackIndex = trackIndex;"
+    },
+    {
+      "id": "none-state",
+      "source": "common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/selector/TrackSelectorManager.java:164-170,257-269,884-894",
+      "claim": "Turning subtitles off is observable without inventing a new flag: the subtitle renderer's selected track becomes an empty SubtitleTrack with format == null and groupIndex == -1.",
+      "evidence": "initMediaTracks:\n  MediaTrack noMediaTrack = MediaTrack.forRendererIndex(rendererIndex);\n  noMediaTrack.isSelected = true;\n  sortedTracks.add(noMediaTrack);\n  renderer.selectedTrack = noMediaTrack;\nsetSelection:\n  mediaTrack.isSelected = groupIndex == trackGroupIndex && Helpers.equalsAny(trackIndex, trackIndexes) && !renderer.isDisabled;\n  MediaTrack noMediaTrack = renderer.sortedTracks.first();\n  noMediaTrack.isSelected = renderer.selectedTrack == null;\n  renderer.isDisabled = renderer.selectedTrack == null;\n  renderer.selectedTrack = renderer.selectedTrack == null ? noMediaTrack : renderer.selectedTrack;\ngetSelectedTrack:\n  return renderer.selectedTrack;\nMediaTrack.isEmpty(): return groupIndex == -1 && trackIndex == -1;"
+    },
+    {
+      "id": "onTracksChanged-gap",
+      "source": "common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/controller/ExoPlayerController.java:277-307; exoplayer-amzn-2.10.6/library/core/src/main/java/com/google/android/exoplayer2/trackselection/TrackSelectionArray.java:33-51",
+      "claim": "The existing onTracksChanged loop cannot report that subtitles were turned off, because a disabled renderer contributes a null element that the loop skips, so an explicit subtitle state must be emitted.",
+      "evidence": "ExoPlayerController.onTracksChanged:\n  for (TrackSelection selection : trackSelections.getAll()) {\n      if (selection != null) {\n          Format format = selection.getFormat(0);\n          mEventListener.onTrackChanged(ExoFormatItem.from(format));\n          mTrackFormatter.setFormat(format);\n      }\n  }\nTrackSelectionArray:\n  /** @param trackSelections The selections. Must not be null, but may contain null elements. */\n  public TrackSelectionArray(@NullableType TrackSelection... trackSelections)"
+    },
+    {
+      "id": "url-uniqueness",
+      "source": "MediaServiceCore/youtubeapi/src/main/java/com/liskovsoft/youtubeapi/videoinfo/models/TranslatedCaptionTrack.java:16-47; MediaServiceCore/youtubeapi/src/main/java/com/liskovsoft/youtubeapi/innertube/utils/PlayerResultExtensions.kt:41-53; exoplayer-amzn-2.10.6/library/dash/src/main/java/com/google/android/exoplayer2/source/dash/manifest/DashManifestParser2.java:404-448",
+      "claim": "Comparing a subtitle representation baseUrl with MediaSubtitle.getBaseUrl() identifies the exact source even when tracks share vssId, because a derived translation track appends &tlang= to the original URL.",
+      "evidence": "TranslatedCaptionTrack:\n  public String getBaseUrl() {\n      if (Helpers.equals(mOriginTrack.getLanguageCode(), mLanguage.getLanguageCode())) { return mOriginTrack.getBaseUrl(); }\n      return mOriginTrack.getBaseUrl() + \"&tlang=\" + mLanguage.getLanguageCode();\n  }\n  public String getVssId() { return mOriginTrack.getVssId(); }\nPlayerResultExtensions.getMergeCaptionTracks:\n  val baseUrl = if (originTrack.languageCode == language.languageCode) originTrack.baseUrl else \"${originTrack.baseUrl}&tlang=${language.languageCode}\"\n  resultTracks.add(CaptionTrack(baseUrl, originTrack.isTranslatable, language.languageCode, originTrack.vssId, ...))\nDashManifestParser2.parseRepresentation(MediaSubtitle sub):\n  String language = sub.getName() == null ? sub.getLanguageCode() : sub.getName();\n  String baseUrl = sub.getBaseUrl();\n  Format format = buildFormat(sub.getVssId(), label, mimeType, ... language, ...);\n  return new RepresentationInfo(format, baseUrl, ...);"
+    },
+    {
+      "id": "id-only-insufficient",
+      "source": "exoplayer-amzn-2.10.6/library/dash/src/main/java/com/google/android/exoplayer2/source/dash/manifest/DashManifestParser2.java:404-448; MediaServiceCore/youtubeapi/src/main/java/com/liskovsoft/youtubeapi/videoinfo/models/TranslatedCaptionTrack.java:36-47; common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/selector/ExoFormatItem.java:167-169",
+      "claim": "Matching subtitle candidates only by Format.id (vssId) or by display name cannot uniquely identify a source, so a binder must verify uniqueness and refuse an ambiguous result instead of taking the first candidate.",
+      "evidence": "DashManifestParser2 uses sub.getVssId() as Format.id and sub.getName() as Format.language.\nTranslatedCaptionTrack.getVssId() { return mOriginTrack.getVssId(); }  // derived tlang track reuses origin vssId\nTranslatedCaptionTrack.getName() { return YouTubeHelper.exoNameFix(mLanguage.getLanguageName()) + TRANSLATE_MARKER; }\nExoFormatItem.equals for TYPE_SUBTITLE:\n  return mType == formatItem.mType && Helpers.contains(SubtitleTrack.trim(mLanguage), SubtitleTrack.trim(formatItem.mLanguage));"
+    },
+    {
+      "id": "normalizer-equivalence",
+      "source": "common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/SubtitleManager.java (pre-refactor, removed lines 98-129); common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/OriginalSubtitleNormalizer.java:60-110; common/src/test/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/OriginalSubtitleNormalizerTest.java",
+      "claim": "OriginalSubtitleNormalizer reproduces the removed inline behavior for every cue shape the decoder produces; passing null-text cues through instead of throwing is the only intended deviation.",
+      "evidence": "REMOVED (old inline):\n  final String textStr = cue.text.toString();\n  if (Helpers.endsWithAny(textStr, \"\\n\", \" \")) { subsBuffer = textStr; }\n  else if (textStr.contains(\"\\n\")) { CharSequence text; if (subsBuffer != null && textStr.contains(subsBuffer)) { text = textStr.replace(subsBuffer, \"\").replace(\"\\n\", \"\"); } else { text = textStr; } result.add(new Cue(text)); String[] split = textStr.split(\"\\n\"); subsBuffer = split.length == 2 ? split[1] : textStr; }\n  else { CharSequence text = subsBuffer != null ? textStr.replace(subsBuffer, \"\") : textStr; result.add(new Cue(text)); subsBuffer = text; }\nNEW (extracted):\n  if (cue.text == null) { result.add(cue); continue; }\n  ... identical branches ...\nTest run: ./gradlew.bat :common:testStbetaDebugUnitTest --tests com.liskovsoft.smartyoutubetv2.common.exoplayer.other.OriginalSubtitleNormalizerTest -> BUILD SUCCESSFUL, 12 tests completed, 0 failed."
+    },
+    {
+      "id": "no-buffer-reset",
+      "source": "common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/SubtitleManager.java:71-76; common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/OriginalSubtitleNormalizer.java:47-49; common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/controller/ExoPlayerController.java:379-382",
+      "claim": "Nothing resets the incremental subtitle buffer on seek or track change, so a line buffered for the previous subtitle source can strip text from the next source until the buffer happens to be replaced.",
+      "evidence": "SubtitleManager.onCues:\n  if (mSubtitleView != null) { mSubtitleView.setCues(mOriginalSubtitleNormalizer.normalize(cues)); }\nOriginalSubtitleNormalizer:\n  /** Drops the incremental scrolling state. */\n  public void reset() { subsBuffer = null; }   // no caller anywhere in main sources\nExoPlayerController:\n  @Override\n  public void onSeekProcessed() { mEventListener.onSeekEnd(); }   // no subtitle state reset"
+    },
+    {
+      "id": "pr-second-writer",
+      "source": "docs/plans/evidence/subtitle-pr-5839.json (SubtitleManager.java patch, unmerged PR #5839)",
+      "claim": "The upstream PR patch adds a second, listener-bypassing writer to the SubtitleView in addition to onCues, so copying it verbatim would create two independent writers that bypass source-identity checks.",
+      "evidence": "    public void onCues(List<Cue> cues) {\n        if (mSubtitleView != null) {\n            List<Cue> processed = forceCenterAlignment(cues);\n            List<Cue> toShow = processed;\n            if (mOnCuesProcessedListener != null) {\n                List<Cue> replacement = mOnCuesProcessedListener.onCuesProcessed(processed);\n                if (replacement != null && !replacement.isEmpty()) { toShow = replacement; ... }\n            }\n            mSubtitleView.setCues(toShow);\n        }\n    }\n\n    /**\n     * Sets cues directly on the view, bypassing processing and the listener callback.\n     * Used by {@link SubtitleTranslator} to replace the displayed cues with merged original+translation text.\n     */\n    public void setCuesDirectly(List<Cue> cues) {\n        if (mSubtitleView != null) { mSubtitleView.setApplyEmbeddedStyles(true); mSubtitleView.setCues(cues); }\n    }"
+    }
+  ]
+}

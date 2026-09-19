@@ -23,6 +23,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.data.Video;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.listener.PlayerEventListener;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.ExoMediaSourceFactory;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.errors.TrackErrorFixer;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSourceBinder;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.VolumeBooster;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.ExoFormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
@@ -54,6 +56,7 @@ public class ExoPlayerController implements Player.EventListener {
     private VolumeBooster mVolumeBooster;
     private boolean mIsEnded;
     private Runnable mOnVideoLoaded;
+    private final SubtitleSourceBinder mSubtitleSourceBinder = new SubtitleSourceBinder();
 
     public ExoPlayerController(Context context, PlayerEventListener eventListener) {
         PlayerTweaksData playerTweaksData = PlayerTweaksData.instance(context);
@@ -65,6 +68,7 @@ public class ExoPlayerController implements Player.EventListener {
         mTrackErrorFixer = new TrackErrorFixer(mTrackSelectorManager);
 
         mMediaSourceFactory.setTrackErrorFixer(mTrackErrorFixer);
+        mMediaSourceFactory.setSubtitleSourceBinder(mSubtitleSourceBinder);
         mEventListener = eventListener;
         
         applyShield720pFix();
@@ -80,42 +84,50 @@ public class ExoPlayerController implements Player.EventListener {
     }
 
     public void openSabr(MediaItemFormatInfo formatInfo) {
+        mSubtitleSourceBinder.clear();
         MediaSource mediaSource = mMediaSourceFactory.fromSabrFormatInfo(formatInfo);
         openMediaSource(mediaSource);
     }
 
     public void openDash(MediaItemFormatInfo formatInfo) {
+        mSubtitleSourceBinder.clear();
         MediaSource mediaSource = mMediaSourceFactory.fromDashFormatInfo(formatInfo);
         openMediaSource(mediaSource);
     }
 
     public void openDash(InputStream dashManifest) {
+        mSubtitleSourceBinder.clear(); // no format info: the source of a subtitle cannot be identified
         MediaSource mediaSource = mMediaSourceFactory.fromDashManifest(dashManifest);
         openMediaSource(mediaSource);
     }
 
     public void openDashUrl(String dashManifestUrl) {
+        mSubtitleSourceBinder.clear();
         MediaSource mediaSource = mMediaSourceFactory.fromDashManifestUrl(dashManifestUrl);
         openMediaSource(mediaSource);
     }
 
     public void openHlsUrl(String hlsPlaylistUrl) {
+        mSubtitleSourceBinder.clear();
         MediaSource mediaSource = mMediaSourceFactory.fromHlsPlaylist(hlsPlaylistUrl);
         openMediaSource(mediaSource);
     }
 
     public void openUrlList(List<String> urlList) {
+        mSubtitleSourceBinder.clear();
         MediaSource mediaSource = mMediaSourceFactory.fromUrlList(urlList);
         openMediaSource(mediaSource);
     }
 
     public void openMerged(MediaItemFormatInfo formatInfo, String hlsPlaylistUrl) {
+        mSubtitleSourceBinder.clear();
         MediaSource dashMediaSource = mMediaSourceFactory.fromDashFormatInfo(formatInfo);
         MediaSource hlsMediaSource = mMediaSourceFactory.fromHlsPlaylist(hlsPlaylistUrl);
         openMediaSource(new MergingMediaSource(dashMediaSource, hlsMediaSource));
     }
 
     public void openMerged(InputStream dashManifest, String hlsPlaylistUrl) {
+        mSubtitleSourceBinder.clear();
         MediaSource dashMediaSource = mMediaSourceFactory.fromDashManifest(dashManifest);
         MediaSource hlsMediaSource = mMediaSourceFactory.fromHlsPlaylist(hlsPlaylistUrl);
         openMediaSource(new MergingMediaSource(dashMediaSource, hlsMediaSource));
@@ -268,6 +280,18 @@ public class ExoPlayerController implements Player.EventListener {
 
     public FormatItem getSubtitleFormat() {
         return getSelectedFormat(TrackSelectorManager.RENDERER_INDEX_SUBTITLE);
+    }
+
+    /**
+     * Source of the subtitle track the user is actually watching, or null when nothing is selected
+     * or the source cannot be identified. Callers must not translate without a bound source.
+     */
+    public SelectedSubtitleSource getSelectedSubtitleSource() {
+        return mSubtitleSourceBinder.resolve(mTrackSelectorManager.getSelectedTrack(TrackSelectorManager.RENDERER_INDEX_SUBTITLE));
+    }
+
+    public SubtitleSourceBinder getSubtitleSourceBinder() {
+        return mSubtitleSourceBinder;
     }
 
     private FormatItem getSelectedFormat(int rendererIndex) {
