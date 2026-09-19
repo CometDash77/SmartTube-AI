@@ -1,5 +1,14 @@
 # SmartTube-AI
 
+## Mandatory session progress record
+
+- At the start of every new session, before planning or development, read `docs/development/README.md` and the latest dated progress file in `docs/development/`. Also read today's file if it exists and any older entries relevant to the task. If no dated file exists, create today's record before development; never invent missing history.
+- Record all local development progress in `docs/development/YYYY-MM-DD.md`, using the calendar date in `Asia/Hong_Kong` (UTC+08:00). There must be exactly one Markdown progress file per recorded date. Reuse that file across sessions and tasks; do not create date suffixes, per-session files, or duplicate daily logs elsewhere.
+- Update the daily record after meaningful milestones or changes of direction and before handing off or ending a session. Include scope, completed work, verification evidence, outstanding work/blockers, and the next step. Distinguish plans from completed work and automated checks from device verification; never record secrets.
+- Before updating a record, re-read it and preserve other sessions' entries. At a date rollover, continue in the new day's file and carry forward outstanding work. Progress records provide context, not authorization: reconcile them with the current repository and latest user instructions.
+
+## Project engineering rules
+
 - This is an Android TV Gradle project. App code is in `smarttubetv/`, shared application code in `common/`; preserve TV remote/focus behavior and existing Android compatibility constraints.
 - `SharedModules/` and `MediaServiceCore/` are Git submodules. `settings.gradle` prefers sibling checkouts (`../SharedModules`, `../MediaServiceCore`) when present. Before editing shared code, establish which checkout the build actually uses; keep unrelated submodule revisions intact.
 - Use the checked-in Gradle wrapper. CI uses JDK 17 and the `stbeta` release variant; dependency and SDK versions come from the selected SharedModules constants. For build setup, task selection, signing, or APK verification, use `.agents/skills/smarttube-build/SKILL.md`.
