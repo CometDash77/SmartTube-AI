@@ -150,6 +150,20 @@ as the historical record of the earlier stage.
 | Version and upgrade strategy (N4) | `versionCode` 2444 is reserved for the next stable release; CI derives every candidate as `versionCode - 1` (2443), so a candidate installs over anything released, the stable upgrades over the candidate, and nightly candidates never consume future stable numbers | policy **implemented**; real upgrade evidence **not verified** |
 | Stable-signed RC path (N8) | `.github/workflows/CI.yml` gained `workflow_dispatch.release_mode`: with the four secrets it assembles `stbetaRelease` at the reserved versionCode with the plain versionName and publishes a unique prerelease; without them it fails before building and publishes nothing (no debug fallback) | path **implemented**; **blocked**: the repository has no secrets, so no project-signed RC exists yet |
 
+### Round-2 device acceptance: **failed** (2026-09-20 12:47–12:49, nightly-18 / TCL Android 11)
+
+Four diagnostic reports (committed verbatim in `device-logs/2026-09-20/`) show `sourceBound=false`,
+`snapshotStatus=NOT_REQUESTED`, **zero** `TIMELINE_REQUESTED` events (the 40-entry ring was never full) and
+29 rejected subtitle exports, while two diagnostic exports succeeded on the same session. Conclusion: at export
+time no *bound* subtitle source existed, so nothing could be exported; the AI switch is irrelevant (identical
+failures before and after `AI_ENABLED`). The user-facing defects are that the app never says "select a text
+subtitle track first", that the API-key entry is labelled "AI translation settings" (no "Key" anywhere, no
+saved-state display, no save confirmation) and that the status line shows "Translating" while AI is off.
+The diagnostics cannot yet distinguish "no track selected" from "track present but source unbound" — that gap
+(plus the per-run debug signing that forces a data-wiping reinstall) is the reason this round needed a human
+round trip. Details, evidence and the reviewable fix list: `subtitle-ai-tv-acceptance-round2-debug-2026-09-20.md`
+and plan section 20.
+
 ### What this session did **not** verify
 
 1. No project-signed RC: `gh secret list` is empty (SIGNING_KEY / KEY_STORE_PASSWORD / ALIAS / KEY_PASSWORD missing).

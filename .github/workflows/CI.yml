@@ -15,6 +15,7 @@ on:
     # must not create another same-code acceptance candidate. Manual dispatch still builds any ref.
     paths-ignore:
       - '**/*.md'
+      - 'docs/**'
   workflow_dispatch:
     inputs:
       release_mode:

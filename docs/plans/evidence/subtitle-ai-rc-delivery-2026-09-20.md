@@ -4,6 +4,15 @@
 “验收通过后如何把同一 APK 原样发布 stable”。使用与验收步骤见
 [`docs/ai-subtitle-user-guide.md`](../../ai-subtitle-user-guide.md)。
 
+## 0. 验收结果：**未通过**（2026-09-20 12:47–12:49，nightly-18）
+
+用户在 TCL/Android 11 上实测第二轮候选后报告：不开 AI 与开了 AI 都导不出字幕、找不到填写 API Key 的地方、
+AI 区功能无法验证。四份诊断报告显示：导出时刻**没有任何已绑定的字幕来源**（`sourceBound=false`）、
+整个会话**从未发起时间轴抓取**（`snapshotStatus=NOT_REQUESTED`、0 条 `TIMELINE_REQUESTED`），
+而诊断导出与写文件正常。直接原因与缺陷清单、待审查的修复方案见
+[`subtitle-ai-tv-acceptance-round2-debug-2026-09-20.md`](subtitle-ai-tv-acceptance-round2-debug-2026-09-20.md)
+与计划 §20。**本节的候选（nightly-16/18）仅作为缺陷证据保留，不得视为可接受的验收版本。**
+
 ## 1. 交付形态与结论
 
 - 交付的是**用于验收的 GitHub prerelease 候选**，不是正式 release；正式 stable 发布等用户验收通过并授权后执行。
