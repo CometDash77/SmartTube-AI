@@ -1,17 +1,68 @@
-name: Build Debug APK
+name: Build, test and publish stbeta test APK
 
+# Delivery path of plan section 15: compilation, lint, unit tests, APK assembly and
+# signature verification run on GitHub, and the verified APKs are published as a
+# prerelease acceptance candidate. The working branch is production; master is kept so
+# the previous trigger keeps working, and manual dispatch can run any ref.
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "production" ]
   workflow_dispatch:
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      HAS_SIGNING_KEY: ${{ secrets.SIGNING_KEY != '' }}
-      HAS_VT_KEY: ${{ secrets.VIRUS_TOTAL_API_KEY != '' }}
+permissions:
+  contents: read
 
+jobs:
+  tests:
+    name: Unit tests (JDK 11, subtitle/export scope)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          submodules: recursive
+
+      # Robolectric 4.6.1 in this repository cannot run on JDK 17, so the unit tests use
+      # JDK 11 while the release build and lint stay on JDK 17 (plan section 15).
+      - name: Set up JDK 11
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Grant Gradle permissions
+        run: chmod +x gradlew
+
+      # Required gate for this task: the AI subtitle and local export package.
+      - name: Required test scope (exoplayer.other)
+        run: ./gradlew :common:testStbetaDebugUnitTest --tests "com.liskovsoft.smartyoutubetv2.common.exoplayer.other.*"
+
+      # Informational only: the complete module task carries two pre-existing
+      # ScreensaverManagerTest failures that predate this work, so it must never be read
+      # as "the module is green". The required gate is the step above.
+      - name: Full common module suite (informational baseline, known failures)
+        continue-on-error: true
+        run: ./gradlew :common:testStbetaDebugUnitTest
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+          if-no-files-found: warn
+
+  publish:
+    name: Lint, build, verify and publish prerelease (JDK 17)
+    runs-on: ubuntu-latest
+    needs: tests
+    permissions:
+      contents: write
+    env:
+      HAS_VT_KEY: ${{ secrets.VIRUS_TOTAL_API_KEY != '' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -25,94 +76,160 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Update Version Name
-        id: get_version
+      # A release APK without the project signing identity must not be published as an
+      # acceptance candidate (plan section 15); no temporary key is generated.
+      - name: Require signing configuration
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          # Keep the original code to make the nightly and original builds interchangeable
-          sed -i "s/versionName \"\(.*\)\"/versionName \"\1-nightly-${{ github.run_number }}\"/" smarttubetv/build.gradle
-          echo "VERSION_NAME=$(grep "versionName" smarttubetv/build.gradle | head -n 1 | awk -F'"' '{print $2}')" >> $GITHUB_OUTPUT
+          missing=""
+          if [ -z "$SIGNING_KEY" ]; then missing="$missing SIGNING_KEY"; fi
+          if [ -z "$KEY_STORE_PASSWORD" ]; then missing="$missing KEY_STORE_PASSWORD"; fi
+          if [ -z "$KEY_ALIAS" ]; then missing="$missing ALIAS"; fi
+          if [ -z "$KEY_PASSWORD" ]; then missing="$missing KEY_PASSWORD"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Publishing is blocked instead of shipping an unsigned or differently signed APK."
+            exit 1
+          fi
+          echo "Signing configuration is present."
 
       - name: Configure Build Signing
-        if: ${{ env.HAS_SIGNING_KEY == 'true' }}
         run: |
           echo "storePassword=${{ secrets.KEY_STORE_PASSWORD }}" > keystore.properties
           echo "keyAlias=${{ secrets.ALIAS }}" >> keystore.properties
           echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
           echo "storeFile=${{ github.workspace }}/key.jks" >> keystore.properties
           echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > ${{ github.workspace }}/key.jks
-    
+
+      - name: Update Version Name
+        id: get_version
+        run: |
+          # Keep the original code so nightly and original builds stay interchangeable
+          sed -i "s/versionName \"\(.*\)\"/versionName \"\1-nightly-${{ github.run_number }}\"/" smarttubetv/build.gradle
+          echo "VERSION_NAME=$(grep "versionName" smarttubetv/build.gradle | head -n 1 | awk -F'"' '{print $2}')" >> $GITHUB_OUTPUT
+
       - name: Grant Gradle permissions
         run: chmod +x gradlew
 
-      - name: Lint with Gradle
-        run: ./gradlew lintStbetaRelease
+      - name: Lint (stbeta release)
+        run: ./gradlew :common:lintStbetaRelease :smarttubetv:lintStbetaRelease
 
       - name: Upload Lint Report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: lint-report
           path: '**/build/reports/lint-results-*.html'
           if-no-files-found: warn
 
-      - name: Build with Gradle
-        run: ./gradlew clean assembleStbetaRelease
+      - name: Assemble stbeta release APKs
+        run: ./gradlew clean :smarttubetv:assembleStbetaRelease
 
+      - name: Verify signatures and build the checksum manifest
+        run: |
+          set -e
+          APKSIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          if [ ! -x "$APKSIGNER" ]; then
+            echo "::error::apksigner was not found in the Android SDK."
+            exit 1
+          fi
+          AAPT=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/aapt 2>/dev/null | sort -V | tail -1 || true)
+
+          mkdir -p publish
+          : > SHA256SUMS.txt
+          : > NOTES.md
+
+          {
+            echo "## SmartTube - stbeta test candidate for T13 acceptance"
+            echo ""
+            echo "This is a **prerelease test build**, not a release. Commit: $GITHUB_SHA"
+            echo ""
+            echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo ""
+            echo "### What to verify on the TV"
+            echo ""
+            echo "1. Long-press the closed-caption button, then use the two new entries at the bottom of the subtitle menu: **Export subtitles** and **Export diagnostic log**."
+            echo "2. After the completion dialog, open a TV file manager and check Documents/SmartTube/Exports/; the dialog shows the exact file name and path."
+            echo "3. The diagnostic export must also work with AI off, without a key and without a subtitle timeline."
+            echo "4. Playback must keep running while an export is in progress."
+            echo ""
+            echo "### Known limits of this candidate"
+            echo ""
+            echo "- Remote focus, file-manager visibility, storage-permission refusal, out-of-space feedback and playback continuity are **not yet device-verified**: that is what this build is for."
+            echo "- versionCode is the project value and was not bumped, so it installs over an equally versioned build; Android refuses an update signed with a different certificate. Do not uninstall the existing app without a backup."
+            echo "- No real DeepSeek request is needed for this feature and the export makes none."
+            echo ""
+            echo "### APK metadata and signature"
+            echo ""
+          } >> NOTES.md
+
+          for apk in smarttubetv/build/outputs/apk/stbeta/release/*.apk; do
+            name=$(basename "$apk")
+            cp "$apk" "publish/$name"
+            sha256sum "$apk" >> SHA256SUMS.txt
+            {
+              echo "#### $name"
+              echo ""
+              echo "```"
+              if [ -x "$AAPT" ]; then
+                "$AAPT" dump badging "$apk" 2>/dev/null | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)" || true
+              else
+                echo "aapt unavailable in this runner"
+              fi
+              "$APKSIGNER" verify --print-certs "$apk" | grep -E "SHA-256 digest|Signer #1 certificate DN" || true
+              echo "```"
+              echo ""
+            } >> NOTES.md
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+          done
+
+          echo "--- Signature verification and checksums ---"
+          cat SHA256SUMS.txt
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_NAME: ${{ steps.get_version.outputs.VERSION_NAME }}
+        run: |
+          set -e
+          TAG="stbeta-$VERSION_NAME-$GITHUB_RUN_NUMBER"
+          echo "Publishing prerelease $TAG"
+          gh release create "$TAG" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION_NAME (T13 acceptance candidate, run $GITHUB_RUN_NUMBER)" \
+            --notes-file NOTES.md \
+            publish/*.apk SHA256SUMS.txt
+          {
+            echo "### Prerelease published"
+            echo ""
+            echo "- tag: $TAG"
+            echo "- commit: $GITHUB_SHA"
+            echo "- run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo ""
+            echo "```"
+            cat SHA256SUMS.txt
+            echo "```"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_stbeta
+          path: publish/*.apk
+          if-no-files-found: warn
+
+      # Optional third-party upload. Disabled for the automatic delivery path (plan
+      # section 15); it only runs on an explicit manual dispatch when the key exists.
       - name: VirusTotal Scan
-        if: ${{ env.HAS_VT_KEY == 'true' }}
-        id: vt
+        if: ${{ env.HAS_VT_KEY == 'true' && github.event_name == 'workflow_dispatch' }}
         uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2 # v5.0.0
         with:
           vt_api_key: ${{ secrets.VIRUS_TOTAL_API_KEY }}
           files: |
-            ./smarttubetv/build/outputs/apk/stbeta/release/*.apk
+            ./publish/*.apk
           request_rate: 4
-
-      - name: VirusTotal Summary
-        if: steps.vt.outcome == 'success'
-        run: |
-          echo "Waiting 150s for VirusTotal engines to report..."
-          sleep 150
-
-          echo "### Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Artifact Name | VirusTotal Status | Detailed Report |" >> $GITHUB_STEP_SUMMARY
-          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-
-          for apk in ./smarttubetv/build/outputs/apk/stbeta/release/*.apk; do
-            filename=$(basename "$apk")
-            sha256=$(sha256sum "$apk" | awk '{print $1}')
-
-            # Construct the dynamic badge URL using the hash
-            badge_url="https://badges.cssnr.com/vt/id/$sha256?start=green&end=red&n=8"
-            vt_link="https://www.virustotal.com/gui/file/$sha256"
-
-            echo "| $filename | [![$filename]($badge_url)]($vt_link) | [View Report]($vt_link) |" >> $GITHUB_STEP_SUMMARY
-          done
-
-      - name: Upload ARM64 APK
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_arm64
-          path: ./smarttubetv/build/outputs/apk/stbeta/release/*_arm64-v8a.apk
-          if-no-files-found: error
-
-      - name: Upload ARMv7 APK
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_armeabi-v7a
-          path: ./smarttubetv/build/outputs/apk/stbeta/release/*_armeabi-v7a.apk
-          if-no-files-found: error
-
-      - name: Upload Universal APK
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_universal
-          path: ./smarttubetv/build/outputs/apk/stbeta/release/*_universal.apk
-          if-no-files-found: error
-
-      - name: Upload x86 APK
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_x86
-          path: ./smarttubetv/build/outputs/apk/stbeta/release/*_x86.apk
-          if-no-files-found: error

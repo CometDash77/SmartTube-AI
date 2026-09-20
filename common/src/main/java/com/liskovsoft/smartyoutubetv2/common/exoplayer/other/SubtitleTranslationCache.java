@@ -3,6 +3,7 @@ package com.liskovsoft.smartyoutubetv2.common.exoplayer.other;
 import java.nio.charset.Charset;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,6 +15,10 @@ import java.util.Map;
  *
  * <p>Two independent limits are enforced: at most 2,000 entries and at most 2 MiB of UTF-8 payload.
  * Failed entries are never stored as successes; their attempt budget lives in the failure tracker.
+ *
+ * <p>The map is guarded because a translation callback may write it while the UI thread reads a
+ * snapshot for the local export (plan section 14, T13). The lock is the cache instance, so the
+ * exported snapshot is a consistent copy rather than a partially written one.
  */
 public class SubtitleTranslationCache {
     /** API 1 charset: java.nio.charset.StandardCharsets is API 19 while this module supports 17. */
@@ -29,7 +34,7 @@ public class SubtitleTranslationCache {
     private long mBytes;
 
     /** Stores a successful translation, evicting least-recently-used entries to stay inside bounds. */
-    public void put(String itemId, String translation) {
+    public synchronized void put(String itemId, String translation) {
         if (itemId == null || translation == null) {
             return;
         }
@@ -44,24 +49,32 @@ public class SubtitleTranslationCache {
         evict();
     }
 
-    public String get(String itemId) {
+    public synchronized String get(String itemId) {
         return itemId != null ? mEntries.get(itemId) : null;
     }
 
-    public boolean hasSuccess(String itemId) {
+    public synchronized boolean hasSuccess(String itemId) {
         return itemId != null && mEntries.containsKey(itemId);
     }
 
-    public int size() {
+    public synchronized int size() {
         return mEntries.size();
     }
 
-    public long getBytes() {
+    public synchronized long getBytes() {
         return mBytes;
     }
 
-    public List<String> getItemIds() {
+    public synchronized List<String> getItemIds() {
         return new ArrayList<>(mEntries.keySet());
+    }
+
+    /**
+     * Consistent copy of the successful entries for one export snapshot; the caller owns it and the
+     * live cache can keep changing without touching the copy.
+     */
+    public synchronized Map<String, String> snapshot() {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(mEntries));
     }
 
     /** Bridges the cache to the frame-to-display alignment without exposing the map. */
@@ -74,7 +87,7 @@ public class SubtitleTranslationCache {
      *
      * @return true while the item may be retried; false once its attempt budget is used up
      */
-    public boolean recordFailure(String itemId) {
+    public synchronized boolean recordFailure(String itemId) {
         if (itemId == null) {
             return false;
         }
@@ -93,28 +106,28 @@ public class SubtitleTranslationCache {
         return true;
     }
 
-    public int attempts(String itemId) {
+    public synchronized int attempts(String itemId) {
         Integer attempts = mAttempts.get(itemId);
         return attempts != null ? attempts : 0;
     }
 
     /** A finished failure must not be retried by a later tick. */
-    public boolean hasExhausted(String itemId) {
+    public synchronized boolean hasExhausted(String itemId) {
         return mExhausted.contains(itemId);
     }
 
     /** An explicit user retry starts a new attempt cycle for the current window. */
-    public void clearFailure(String itemId) {
+    public synchronized void clearFailure(String itemId) {
         mAttempts.remove(itemId);
         mExhausted.remove(itemId);
     }
 
-    public void clearFailures() {
+    public synchronized void clearFailures() {
         mAttempts.clear();
         mExhausted.clear();
     }
 
-    public void clear() {
+    public synchronized void clear() {
         mEntries.clear();
         mBytes = 0;
         clearFailures();

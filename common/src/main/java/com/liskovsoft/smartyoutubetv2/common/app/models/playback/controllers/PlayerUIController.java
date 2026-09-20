@@ -1,5 +1,6 @@
 package com.liskovsoft.smartyoutubetv2.common.app.models.playback.controllers;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.KeyEvent;
@@ -15,6 +16,7 @@ import com.liskovsoft.mediaserviceinterfaces.data.PlaylistInfo;
 import com.liskovsoft.sharedutils.helpers.Helpers;
 import com.liskovsoft.sharedutils.helpers.KeyHelpers;
 import com.liskovsoft.sharedutils.helpers.MessageHelpers;
+import com.liskovsoft.sharedutils.helpers.PermissionHelpers;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.sharedutils.rx.RxHelper;
 import com.liskovsoft.smartyoutubetv2.common.R;
@@ -27,6 +29,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionCatego
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.UiOptionItem;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.AppDialogPresenter;
+import com.liskovsoft.smartyoutubetv2.common.app.presenters.PlaybackPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.ChannelPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter;
@@ -40,6 +43,8 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTargetLangu
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiSettingsController;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportController;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportWriteOutcome;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.track.SubtitleTrack;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
@@ -358,6 +363,108 @@ public class PlayerUIController extends BasePlayerController {
 
         settingsPresenter.appendSingleButton(UiOptionItem.from(
                 getContext().getString(aiSubtitleStatusResId(status)), option -> { }));
+
+        // Two independent, always reachable entries (plan section 14, T13): the diagnostic export
+        // must work with no key, with AI off and with a failed snapshot, so it is never hidden
+        // behind a developer switch.
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_export_subtitles),
+                option -> startAiSubtitleExport(true)));
+
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_export_diagnostics),
+                option -> startAiSubtitleExport(false)));
+    }
+
+    /**
+     * Starts one background export. A second press while an export runs is refused instead of queued
+     * (plan section 14: repeated taps must not create duplicate work), and the finished file is
+     * reported with its real name and location.
+     */
+    private void startAiSubtitleExport(boolean subtitles) {
+        PlaybackPresenter presenter = getPlaybackPresenter();
+
+        if (presenter == null || getContext() == null) {
+            return;
+        }
+
+        boolean started = subtitles
+                ? presenter.exportAiSubtitles(this::onAiSubtitleExportFinished)
+                : presenter.exportAiSubtitleDiagnostics(this::onAiSubtitleExportFinished);
+
+        if (!started) {
+            MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_export_busy);
+        }
+    }
+
+    /** Runs on the UI thread (the presenter forwards through its main handler). */
+    private void onAiSubtitleExportFinished(SubtitleExportController.ExportResult result) {
+        Context context = getContext();
+
+        if (result == null || context == null) {
+            return; // the player was already torn down: nothing to show
+        }
+
+        if (result.isSuccess()) {
+            showAiSubtitleExportResult(
+                    context,
+                    context.getString(result.getKind() == SubtitleExportController.Kind.SUBTITLES
+                            ? R.string.ai_subtitle_export_subtitles_done
+                            : R.string.ai_subtitle_export_diagnostics_done),
+                    context.getString(R.string.ai_subtitle_export_saved_message,
+                            result.getFileName(), result.getLocation()));
+            return;
+        }
+
+        if (SubtitleExportWriteOutcome.Status.PERMISSION_DENIED.name().equals(result.getFailureCode())) {
+            // Explain the purpose, then ask the system: first use on older Android only.
+            MessageHelpers.showMessage(context,
+                    context.getString(R.string.ai_subtitle_export_permission_purpose), true);
+            PermissionHelpers.verifyStoragePermissions(context);
+            return;
+        }
+
+        MessageHelpers.showMessage(context, context.getString(
+                R.string.ai_subtitle_export_failed_message, aiSubtitleExportReason(result.getFailureCode())), true);
+    }
+
+    /**
+     * The result must be readable on a TV: a toast is truncated on modern Android, so the exact file
+     * name and path are shown in a dismissible dialog that leaves playback running.
+     */
+    private void showAiSubtitleExportResult(Context context, String title, String message) {
+        AppDialogPresenter dialog = AppDialogPresenter.instance(context);
+
+        dialog.appendStringsCategory(message, java.util.Collections.singletonList(
+                UiOptionItem.from(context.getString(R.string.ai_subtitle_export_close),
+                        option -> dialog.goBack())));
+        dialog.showDialog(title);
+    }
+
+    private String aiSubtitleExportReason(String failureCode) {
+        Context context = getContext();
+
+        if (SubtitleExportController.CODE_NO_TIMELINE.equals(failureCode)) {
+            return context.getString(R.string.ai_subtitle_export_no_timeline);
+        }
+
+        if (SubtitleExportWriteOutcome.Status.PERMISSION_DENIED.name().equals(failureCode)) {
+            return context.getString(R.string.ai_subtitle_export_permission_needed);
+        }
+
+        if (SubtitleExportWriteOutcome.Status.NO_SPACE.name().equals(failureCode)) {
+            return context.getString(R.string.ai_subtitle_export_no_space);
+        }
+
+        if (SubtitleExportWriteOutcome.Status.FILE_EXISTS.name().equals(failureCode)) {
+            return context.getString(R.string.ai_subtitle_export_file_exists);
+        }
+
+        if (SubtitleExportWriteOutcome.Status.NO_LOCATION.name().equals(failureCode)) {
+            return context.getString(R.string.ai_subtitle_export_no_location);
+        }
+
+        return context.getString(R.string.ai_subtitle_export_failed_unknown);
     }
 
     private static int aiSubtitleStatusResId(SubtitleAiMenuState.Status status) {

@@ -6,7 +6,7 @@ daily progress record stays in `docs/development/2026-09-20.md`.
 
 ## Historical automated evidence (reported by earlier implementation rounds)
 
-Retrospective correction: these results were not rerun in this review. New Gradle checks and APK delivery must run on GitHub per plan section 15. The full module has two recorded failures and lint registry coverage is incomplete; do not label all gates passed. T13 exports and the GitHub prerelease workflow remain pending.
+Retrospective correction: these results were not rerun in this review. New Gradle checks and APK delivery must run on GitHub per plan section 15. The full module has two recorded failures and lint registry coverage is incomplete; do not label all gates passed. The T13 local export is now implemented locally with tests (see the T13 section below), but no Gradle check, lint, device check or GitHub prerelease run has been performed for it either.
 
 | Command | Result |
 | --- | --- |
@@ -32,6 +32,7 @@ Retrospective correction: these results were not rerun in this review. New Gradl
 | API correctness | `SubtitleRequestBuilderTest`, `SubtitleResponseParserTest`, `SubtitleResponseHandlerTest`, `SubtitleRetryPolicyTest`, `SubtitleEndpointTest`, `SubtitleCredentialsTest`, `SubtitleOkHttpWireTest` (local synthetic service) | authorised real-key minimal test | automated **verified** (local HTTP only); real DeepSeek call **not done** |
 | Key and configuration | `SubtitleKeyEnvelopeTest`, `SubtitleKeyCipherTest`, `PersistentSubtitleKeyStoreTest`, `SubtitleKeyFileStorageTest`, `SubtitleKeyBackupRulesTest`, `SubtitleKeyStoreFactoryTest`, `MemorySubtitleKeyStoreTest`, `SubtitleAiPrefsStoreTest`, `AppPrefsSubtitleAiBackendTest`, `SubtitleAiSettingsControllerTest` | Keystore restart/invalidation, backup/restore, clear key | automated **verified** (JVM crypto, storage paths, backup rules); real keystore and export **not verified** |
 | Original behaviour preserved | `OriginalSubtitleNormalizerTest` (including a differential test against the former inline implementation), `AiSubtitleControllerTest` (AI off) | CC memory, auto-translated tracks, styles, channel preferences, SABR | automated **verified**; device **not verified** |
+| Local one-click export (T13) | 5 new test classes executed with JUnitCore: SRT boundaries/Unicode/partial translations, ZIP entries and coverage note, diagnostic whitelist and leak checks, click-time snapshot and one-job guard (OK, 45 tests) | remote focus, one-press export, file-manager visibility/copy of `Documents/SmartTube/Exports/`, permission refusal, out-of-space feedback, playback continuity | local **verified** (javac + JUnitCore, not Gradle); Gradle tests/lint **not run**; device **not verified** |
 
 ## Explicit gaps (do not read as completed)
 
@@ -46,6 +47,39 @@ Retrospective correction: these results were not rerun in this review. New Gradl
    was performed and release lint did not run with its full issue registry under JDK 11, so release quality
    gates are not claimed; no installation or publication happened.
 5. **No commit, push or publication** was performed by this session.
+
+## T13 local export — implemented locally, not device-verified
+
+Added 2026-09-20 (DSH round 52). Source: nine new classes under
+`common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/` plus the
+`SubtitleTranslationCache`, `AiSubtitleSessionBinder`, `PlaybackPresenter` and `PlayerUIController`
+integrations and 15 strings in each of `values`, `values-zh` and `values-zh-rTW`. Details and the exact
+per-claim adjudication are in `subtitle-t13-review.md` and plan section 14.1.
+
+What is evidenced locally:
+
+- JDK 17 `javac` compiled the seven pure classes, the file store, the environment reader, the cache and the
+  binder against the real `android.jar` (SDK 34), the checked-in ExoPlayer core jar and the previously
+  compiled `common` classes: exit 0. `PlaybackPresenter` and `PlayerUIController` compile with the same
+  approach; their only 15 diagnostics were the not-yet-regenerated `R.string.ai_subtitle_export_*` fields, and
+  all 15 keys were confirmed present in the three locale files.
+- The five new test classes compiled and ran with JUnitCore (JUnit 4.12, JDK 17): **OK (45 tests)**. Four
+  first-run failures were defects in the test code itself and were fixed.
+- One live Jev `audit` (7 claims, `typesafe/jev-1.13-20260917`, 1 request, no retry/fallback): three rows above
+  the local thresholds, four adjudicated by hand against the source. Input, result and the manual decisions are
+  preserved under `docs/plans/evidence/subtitle-t13-*.json` and `subtitle-t13-review.md`.
+- Deterministic checks: the nine export classes contain zero transport/network references; the only cache-looking
+  mutator is the event ring's own `clear()`; the cache limits (2,000 entries / 2 MiB) are untouched.
+
+Explicitly **not** verified:
+
+- No Gradle task was run: `:common:testStbetaDebugUnitTest`, both `lintStbetaRelease` tasks, debug/release
+  compile and APK assembly/signature checks stay GitHub-only per plan section 15.
+- No device or emulator was available, so the two menu entries' remote focus, one-press export, file-manager
+  visibility and copy of `Documents/SmartTube/Exports/`, storage-permission refusal, out-of-space feedback and
+  playback continuity during an export have no device evidence.
+- The public-directory choice is implemented and reasoned from the existing `MediaStoreFile`/backup path, but
+  "the user can see and copy the file with a TV file manager" is a device claim and is not made here.
 
 ## How the feature behaves in the player (usage notes)
 

@@ -622,7 +622,7 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 
 ## 14. 新增需求：电视本地一键导出（2026-09-20）
 
-状态：用户已明确要求**字幕和诊断日志都导出，分别提供按钮**；本节为待实施任务，不代表功能已实现。此项更新取代 §13 中“不新增功能”的笼统限制；已有缺陷修复与本地证据核对仍可继续。目的是让用户在电视端完成采集，通过文件管理器取走文件，无须连接 ADB。
+状态：用户已明确要求**字幕和诊断日志都导出，分别提供按钮**；本节已于 2026-09-20 在本地实现（状态见 14.1），但未提交、未推送、未做设备验收，不能读作已完成验收。此项更新取代 §13 中“不新增功能”的笼统限制；已有缺陷修复与本地证据核对仍可继续。目的是让用户在电视端完成采集，通过文件管理器取走文件，无须连接 ADB。
 
 ### T13 本地导出
 
@@ -638,6 +638,14 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 - **验收**：自动化覆盖 SRT 时间边界、Unicode/多行、部分译文、视频切换隔离、文件名冲突、无字幕仍可导日志及敏感值不泄露；运行受影响测试、编译和兼容性 lint。设备验证遥控器可达、一次点击导出、文件管理器可见且可复制、空间不足/权限拒绝反馈，以及导出时播放不中断。无设备时只报告自动化结果，不标为设备验收完成。
 
 下一阶段优先执行 T13，让后续真实来源与设备故障能由用户直接提供本地诊断文件。设备、有效字幕来源和真实 API 三条验收线按各自条件推进，不要求条件一次齐全；一次真实调用不能证明 429 路径，限流仍由本地模拟服务验证。
+
+### 14.1 T13 实施状态（2026-09-20，本地）
+
+- 已完成本地实现（未提交、未推送、未安装、未发布）：`SubtitleExportSnapshot`、`SubtitleSrtFormatter`、`SubtitleExportBundle`、`SubtitleDiagnosticReport`、`SubtitleExportEventLog`、`SubtitleExportWriteOutcome`、`SubtitleExportController`、`SubtitleExportFileStore`、`SubtitleDiagnosticEnvironment`（均位于 `common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/`）；接线改动在 `SubtitleTranslationCache`（新增 `snapshot()` 与并发保护）、`AiSubtitleSessionBinder`（`getTimeline()`）、`PlaybackPresenter`（点击时快照、事件记录、主线程回送结果）与 `PlayerUIController`（两个菜单按钮、结果对话框、权限用途说明）；`values`、`values-zh`、`values-zh-rTW` 各新增 15 条字符串。
+- 由于说明文件与状态描述，以上实现不代表已通过验收：位置与内容见下。保存位置为公共 `Documents/SmartTube/Exports/`（API 29+ 复用 `MediaStoreFile`，旧版本直写公共目录并复用项目存储权限检查）；字幕包含 `original.srt`，存在译文时另有 `translated.srt` 与 `bilingual.srt`，并始终包含说明文件（覆盖范围、缺失译文与原文回退、缓存上限可能导致淘汰、最后一条结束时间为估算）。诊断报告只输出 35 项字段白名单，在无字幕时间轴、无 Key、AI 关闭时同样可用。两者都不发起网络请求、不修改缓存上限、不覆盖同名文件，重复点击只保留一个任务。
+- 本地验证（不是 Gradle）：新代码以 JDK 17 `javac` 针对 `android.jar`(SDK 34)、仓库内 ExoPlayer core jar 与既有已编译类通过编译（exit 0）；5 个新测试类以 JUnitCore 直接执行得到 **OK (45 tests)**；一次 live Jev `audit`（7 条 claim/evidence，5,228/320 tokens，输入 sha256 `e2d4f928…`，无重试/回退）的原始输入、实际结果与逐条回源结论保存在 `docs/plans/evidence/subtitle-t13-jev-input.json`、`subtitle-t13-jev-result.json` 与 `subtitle-t13-review.md`。API-17 审计同时发现并修复了 `AiSubtitleSessionBinder` 中 `java.util.Objects.equals`（API 19）这一既有用法。
+- 尚未完成（不得读作已通过）：`:common:testStbetaDebugUnitTest`、`:common:lintStbetaRelease`、`:smarttubetv:lintStbetaRelease`、debug/release 编译与 APK 组装/签名核对按 §15 在 GitHub Actions 执行；设备验收项为遥控器焦点、一次点击导出、文件管理器可见且可复制、权限拒绝反馈、空间不足反馈，以及导出期间播放不中断。
+
 
 ## 15. GitHub 编译、签名与 prerelease 交付（最新执行约束）
 

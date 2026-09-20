@@ -176,6 +176,16 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         }
     }
 
+    /**
+     * The timeline installed for the current source, or null while no snapshot was obtained.
+     *
+     * <p>An export takes this reference at click time: a later source change replaces the field with
+     * a different immutable timeline, so the already started export keeps its own snapshot.
+     */
+    public SubtitleTimeline getTimeline() {
+        return mTimeline;
+    }
+
     /** Remembers the items of the frame the player is showing right now. */
     public void onFrameItems(List<SubtitleItem> items) {
         mFrameItems = items == null ? Collections.<SubtitleItem>emptyList() : new ArrayList<>(items);
@@ -250,7 +260,7 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         mController.onSubtitleSourceSelected(mSourceProvider != null ? mSourceProvider.getSelectedSubtitleSource() : null);
         String currentKey = mController.getActiveSourceKey();
 
-        if (!java.util.Objects.equals(previousKey, currentKey)) {
+        if (previousKey == null ? currentKey != null : !previousKey.equals(currentKey)) {
             cancelDispatcher(); // the selected source changed: a batch of the old one belongs to it
         }
     }

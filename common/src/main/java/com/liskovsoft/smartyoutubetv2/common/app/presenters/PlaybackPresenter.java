@@ -22,6 +22,14 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslation
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationStats;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationService;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleDisplay;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleDiagnosticEnvironment;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportController;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportEventLog;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportFileStore;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportSnapshot;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportWriteOutcome;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleComposer;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTimeline;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
@@ -53,7 +61,9 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils.Processor;
 import com.liskovsoft.googlecommon.common.helpers.ServiceHelper;
 
 import java.lang.ref.WeakReference;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class PlaybackPresenter extends BasePresenter<PlaybackView> implements PlayerEventListener {
@@ -82,6 +92,12 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private final AtomicBoolean mAiSnapshotCancelled = new AtomicBoolean();
     private boolean mAiSnapshotRequested;
     private final SubtitleTranslationStats mAiStats = new SubtitleTranslationStats();
+    /** Bounded recent session events for the diagnostic export: enumerated codes only, never content. */
+    private final SubtitleExportEventLog mAiEvents = new SubtitleExportEventLog(android.os.SystemClock::elapsedRealtime);
+    /** Outcome of the last snapshot attempt; the diagnostic report prints it instead of guessing. */
+    private volatile String mAiSnapshotStatus = "NOT_REQUESTED";
+    private SubtitleExportController mAiExport;
+    private ExecutorService mAiExportExecutor;
     private final android.os.Handler mMainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private PlaybackPresenter(Context context) {
@@ -331,6 +347,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         AiSubtitleSessionBinder subtitles = aiSubtitleBinder();
 
         cancelAiSubtitleTimeline(); // a new media source invalidates the fetched timeline too
+        mAiSnapshotStatus = "NOT_REQUESTED";
+        mAiEvents.add("SOURCE_CHANGED");
 
         if (subtitles != null) {
             subtitles.onSourceChanged(); // invalidate the previous identity before anyone reacts
@@ -433,12 +451,23 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             mAiSnapshotExecutor = Executors.newSingleThreadExecutor();
         }
 
+        mAiEvents.add("TIMELINE_REQUESTED");
+
         mAiSnapshotExecutor.execute(() -> {
             SubtitleSnapshotFetcher.Result result = new SubtitleSnapshotFetcher(
                     new SubtitleSnapshotReader(), factory)
                     .fetch(source, format, com.google.android.exoplayer2.C.TIME_UNSET, mAiSnapshotCancelled::get);
 
-            if (mAiSnapshotCancelled.get() || !result.isUsable()) {
+            boolean cancelled = mAiSnapshotCancelled.get();
+            // A refused snapshot is diagnostic evidence, so its status survives even though nothing
+            // is displayed (plan section 14: the report must work without a timeline).
+            String status = cancelled ? SubtitleSnapshotReader.Status.CANCELLED.name()
+                    : (result != null && result.getStatus() != null ? result.getStatus().name() : "UNKNOWN");
+
+            mAiSnapshotStatus = status;
+            mAiEvents.add("SNAPSHOT_" + status);
+
+            if (cancelled || !result.isUsable()) {
                 return; // cancelled or unusable: the original subtitles stay
             }
 
@@ -459,6 +488,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     /** Called by the subtitle menu when the per-video AI switch changes. */
     public void applyAiEnabled(boolean enabled) {
         buildAiSubtitleChain();
+        mAiEvents.add(enabled ? "AI_ENABLED" : "AI_DISABLED");
 
         // The switch must reach the session as well: turning AI off has to restore the original on
         // screen immediately, and turning it on has to apply the stored display mode.
@@ -517,6 +547,125 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         return mAiSettings;
     }
 
+    /** Notified on the UI thread when a local export finished (plan section 14, T13). */
+    public interface OnAiSubtitleExportFinished {
+        void onExportFinished(SubtitleExportController.ExportResult result);
+    }
+
+    /**
+     * Exports the subtitles already obtained for the current source: the original timeline, the
+     * cached translations and a coverage note. It never translates, never requests and never cancels
+     * a pending translation to make the archive bigger.
+     *
+     * @return false when another export is already running
+     */
+    public boolean exportAiSubtitles(OnAiSubtitleExportFinished listener) {
+        return exportAi(true, listener);
+    }
+
+    /**
+     * Exports the desensitised diagnostic report. It needs no subtitle timeline, no configured key
+     * and no enabled AI switch, because a failed snapshot is exactly what has to be reportable.
+     *
+     * @return false when another export is already running
+     */
+    public boolean exportAiSubtitleDiagnostics(OnAiSubtitleExportFinished listener) {
+        return exportAi(false, listener);
+    }
+
+    private boolean exportAi(boolean subtitles, final OnAiSubtitleExportFinished listener) {
+        SubtitleExportController export = aiExportController();
+
+        if (export == null) {
+            return false;
+        }
+
+        SubtitleExportController.Listener forwarder = result -> {
+            mAiEvents.add((result.getKind() == SubtitleExportController.Kind.SUBTITLES
+                    ? "EXPORT_SUBTITLES_" : "EXPORT_DIAGNOSTICS_")
+                    + (result.isSuccess() ? "OK" : "FAILED_" + result.getFailureCode()));
+
+            if (listener != null) {
+                listener.onExportFinished(result);
+            }
+        };
+
+        return subtitles ? export.exportSubtitles(forwarder) : export.exportDiagnostics(forwarder);
+    }
+
+    /**
+     * Builds the single export controller of this presenter. The busy flag must survive between
+     * presses, so the controller is created once; every dependency inside it resolves the current
+     * context, player or settings at call time instead of capturing them.
+     */
+    private synchronized SubtitleExportController aiExportController() {
+        if (mAiExport == null) {
+            mAiExport = new SubtitleExportController(this::buildAiExportSnapshot,
+                    () -> SubtitleDiagnosticEnvironment.read(getContext()),
+                    (baseName, extension, bytes) -> {
+                        Context context = getContext();
+
+                        return context != null
+                                ? new SubtitleExportFileStore(context).write(baseName, extension, bytes)
+                                : SubtitleExportWriteOutcome.failure(SubtitleExportWriteOutcome.Status.NO_LOCATION, null, null);
+                    },
+                    mMainHandler::post,
+                    System::currentTimeMillis,
+                    acquireAiExportExecutor());
+        }
+
+        return mAiExport;
+    }
+
+    /**
+     * One worker for the whole process. The presenter is a singleton, and a player teardown in the
+     * middle of an export must not interrupt the file the user asked for, so this executor is not
+     * stopped with the engine (unlike the snapshot worker).
+     */
+    private synchronized ExecutorService acquireAiExportExecutor() {
+        if (mAiExportExecutor == null || mAiExportExecutor.isShutdown()) {
+            mAiExportExecutor = Executors.newSingleThreadExecutor();
+        }
+
+        return mAiExportExecutor;
+    }
+
+    /**
+     * Copies everything one export may use, on the calling (UI) thread. Because it is a copy, a video
+     * or track change after the press cannot mix new session content into the finished file.
+     */
+    private SubtitleExportSnapshot buildAiExportSnapshot() {
+        AiSubtitleSessionBinder binder = mAiSubtitleBinder;
+        PlaybackView player = mPlayer.get();
+        SubtitleExportSnapshot.Source source = SubtitleExportSnapshot.Source.none();
+
+        if (player instanceof AiSubtitleHost) {
+            SelectedSubtitleSource selected = ((AiSubtitleHost) player).getSelectedSubtitleSource();
+
+            if (selected != null) {
+                // The base URL stays where it belongs (memory only): the snapshot keeps the safe parts.
+                source = new SubtitleExportSnapshot.Source(true, selected.getType(), selected.getMimeType(),
+                        selected.getLanguageCode(), selected.getVssId(), selected.isTranslatable());
+            }
+        }
+
+        boolean aiEnabled = binder != null && binder.getController().isAiEnabled();
+        int displayMode = binder != null ? binder.getController().getDisplayMode() : SubtitleComposer.MODE_ORIGINAL_ONLY;
+        boolean keyConfigured = mAiSettings != null && mAiSettings.isKeyConfigured();
+        String targetLanguage = mAiSettings != null ? mAiSettings.getSettings().getTargetLanguage() : null;
+        SubtitleTranslationCache cache = mAiTranslationCache;
+        Map<String, String> translations = cache != null ? cache.snapshot() : Collections.<String, String>emptyMap();
+        SubtitleTimeline timeline = binder != null ? binder.getTimeline() : null;
+        SubtitleExportSnapshot.Counters counters = new SubtitleExportSnapshot.Counters(
+                mAiStats.getRequests(), mAiStats.getDeliveredItems(), mAiStats.getFailedBatches(),
+                mAiStats.getCancelledBatches(), translations.size(), cache != null ? cache.getBytes() : 0);
+
+        return new SubtitleExportSnapshot(System.currentTimeMillis(), source,
+                new SubtitleExportSnapshot.Session(aiEnabled, keyConfigured, displayMode, targetLanguage,
+                        mAiSnapshotStatus),
+                counters, timeline, translations, mAiEvents.snapshot());
+    }
+
     /**
      * Lazily joins the player event stream, the UI display surface and the bound source.
      *
@@ -555,6 +704,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     public void onEngineReleased() {
         getTickleManager().removeListener(this);
 
+        mAiEvents.add("ENGINE_RELEASED");
         cancelAiSubtitleTimeline();
 
         if (mAiSnapshotExecutor != null) {
