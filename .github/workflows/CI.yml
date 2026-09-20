@@ -48,6 +48,9 @@ jobs:
       - name: Grant Gradle permissions
         run: chmod +x gradlew
 
+      - name: Update feed contract tests
+        run: python3 -B scripts/test_create_update_manifest.py
+
       # Required gate for this task: the AI subtitle and local export package.
       - name: Required test scope (exoplayer.other)
         run: ./gradlew :common:testStbetaDebugUnitTest --tests "com.liskovsoft.smartyoutubetv2.common.exoplayer.other.*"
@@ -186,6 +189,8 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.VERSION_NAME }}
           VERSION_CODE: ${{ steps.version.outputs.VERSION_CODE }}
           RELEASE_MODE: ${{ steps.version.outputs.RELEASE_MODE }}
+          TAG: ${{ steps.version.outputs.TAG }}
+          EXPECT_PROJECT_SIGNATURE: ${{ secrets.SIGNING_KEY != '' }}
         run: |
           set -e
           APKSIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
@@ -242,7 +247,7 @@ jobs:
           for apk in "$APK_DIR"/*.apk; do
             name=$(basename "$apk")
             cp "$apk" "publish/$name"
-            sha256sum "$apk" >> SHA256SUMS.txt
+            (cd publish && sha256sum "$name") >> SHA256SUMS.txt
             {
               echo "#### $name"
               echo ""
@@ -257,7 +262,20 @@ jobs:
               echo ""
             } >> NOTES.md
             "$APKSIGNER" verify --verbose --print-certs "$apk"
+            if [ "$EXPECT_PROJECT_SIGNATURE" = "true" ]; then
+              EXPECTED=$(tr -d '\r\n' < docs/release/signing-certificate.sha256)
+              ACTUAL=$("$APKSIGNER" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+              if [ "$ACTUAL" != "$EXPECTED" ]; then
+                echo '::error::APK certificate does not match the pinned project identity'
+                exit 1
+              fi
+            fi
           done
+
+          python3 scripts/create-update-manifest.py --repository "$GITHUB_REPOSITORY" \
+            --tag "$TAG" --version "$VERSION_NAME" --code "$VERSION_CODE" \
+            --apk-dir publish --output publish/smarttube-ai.json
+          (cd publish && sha256sum smarttube-ai.json) >> SHA256SUMS.txt
 
           echo "--- Signature verification and checksums ---"
           cat SHA256SUMS.txt
@@ -274,7 +292,7 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$VERSION_NAME (stbeta acceptance candidate, run $GITHUB_RUN_NUMBER)" \
             --notes-file NOTES.md \
-            publish/*.apk SHA256SUMS.txt
+            publish/*.apk publish/smarttube-ai.json SHA256SUMS.txt
           {
             echo "### Prerelease published"
             echo ""

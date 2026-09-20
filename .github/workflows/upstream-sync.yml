@@ -1,0 +1,35 @@
+name: Track upstream SmartTube
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'CometDash77/SmartTube-AI'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+      - name: Fast-forward pristine upstream branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch https://github.com/yuliskov/SmartTube.git master:refs/remotes/source/master
+          # Normal push refuses rewritten history or accidental fork commits. Never force it.
+          git push origin refs/remotes/source/master:refs/heads/upstream-mirror
+          {
+            echo '### Upstream tracking'
+            echo "Upstream commit: $(git rev-parse refs/remotes/source/master)"
+            echo 'Compare pending updates: https://github.com/CometDash77/SmartTube-AI/compare/master...upstream-mirror'
+            echo 'Product branches are never merged automatically.'
+          } >> "$GITHUB_STEP_SUMMARY"
