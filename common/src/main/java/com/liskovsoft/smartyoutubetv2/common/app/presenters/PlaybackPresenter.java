@@ -10,11 +10,10 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleHandlerSche
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitlePrefetchLoop;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotFetcher;
-import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotReader;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTimelineCoordinator;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleOkHttpTranslationClient;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleKeyStores;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationCache;
@@ -89,8 +88,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private boolean mIsAiSubtitleChainReady;
     private SubtitlePrefetchLoop mAiLoop;
     private ExecutorService mAiSnapshotExecutor;
-    private final AtomicBoolean mAiSnapshotCancelled = new AtomicBoolean();
-    private boolean mAiSnapshotRequested;
+    /** Owns the request identity of the one timeline read per source (task N1). */
+    private SubtitleTimelineCoordinator mAiTimeline;
     private final SubtitleTranslationStats mAiStats = new SubtitleTranslationStats();
     /** Bounded recent session events for the diagnostic export: enumerated codes only, never content. */
     private final SubtitleExportEventLog mAiEvents = new SubtitleExportEventLog(android.os.SystemClock::elapsedRealtime);
@@ -346,7 +345,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     public void onSourceChanged(Video item) {
         AiSubtitleSessionBinder subtitles = aiSubtitleBinder();
 
-        cancelAiSubtitleTimeline(); // a new media source invalidates the fetched timeline too
+        invalidateAiSubtitleTimeline(); // a new media source invalidates the fetched timeline too
         mAiSnapshotStatus = "NOT_REQUESTED";
         mAiEvents.add("SOURCE_CHANGED");
 
@@ -386,10 +385,11 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                     }
 
                     mAiStats.reset();
-                    cancelAiSubtitleTimeline();
 
-                    // Restart for the new configuration instead of waiting for an unrelated event.
-                    requestAiSubtitleTimeline();
+                    // The original timeline is independent of endpoint, model and language, so it must
+                    // not be fetched again; re-installing it restarts prefetch for the new
+                    // configuration instead of waiting for an unrelated track event (plan 6.3).
+                    reinstateAiSubtitleTimeline();
                 });
         mAiTranslationCache = new SubtitleTranslationCache();
         mAiDispatcher = new SubtitleTranslationDispatcher(new SubtitleBatchPlanner(), mAiTranslationCache,
@@ -422,76 +422,127 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     }
 
     /**
-     * Fetches the timeline of the bound subtitle source once per source snapshot (plan 4.1).
+     * Prepares the timeline of the bound subtitle source, at most once per source (plan 4.1, task N1).
      *
      * <p>This is deliberately independent of the AI translation switch: the local export needs the
-     * original timeline even for a user who never configures a key, so the fetch is also started by
-     * ordinary subtitle events. A timeline that is already installed for the current source is never
-     * fetched twice.
-     *
-     * <p>The fetch runs on a single worker; the timeline is installed on the main thread and only
-     * when the attempt was not cancelled meanwhile. An unusable snapshot leaves the original
-     * subtitles in place, and no retry loop is started here - a new attempt needs a new event.
+     * original timeline even for a user who never configures a key, so the request is also started by
+     * ordinary subtitle events. Repeated events of the same source reuse the running or finished
+     * read instead of restarting it, and a real change abandons the previous attempt with its own
+     * cancellation flag, so a late answer can neither install a timeline nor overwrite the current
+     * diagnostic status.
      */
     public void requestAiSubtitleTimeline() {
-        PlaybackView player = mPlayer.get();
-
-        if (!(player instanceof AiSubtitleHost) || mAiSubtitleBinder == null || mAiSnapshotRequested) {
-            return;
+        if (mAiSubtitleBinder == null) {
+            return; // no playback surface bound the subtitle source
         }
 
-        if (mAiSubtitleBinder.getTimelineOfCurrentSource() != null) {
-            return; // this source already has its timeline; refetching would only cost another read
+        if (aiTimeline().request()) {
+            // A refused snapshot is diagnostic evidence, so its status survives even though nothing is
+            // displayed (plan section 14: the report must work without a timeline).
+            mAiEvents.add("TIMELINE_REQUESTED");
         }
-
-        AiSubtitleHost host = (AiSubtitleHost) player;
-        SelectedSubtitleSource source = host.getSelectedSubtitleSource();
-        com.google.android.exoplayer2.Format format = host.getSelectedSubtitleFormat();
-        SubtitleSnapshotFetcher.PayloadFactory factory = host.createSubtitlePayloadFactory();
-
-        if (source == null || format == null || factory == null) {
-            return;
-        }
-
-        mAiSnapshotRequested = true;
-        mAiSnapshotCancelled.set(false);
-
-        if (mAiSnapshotExecutor == null) {
-            mAiSnapshotExecutor = Executors.newSingleThreadExecutor();
-        }
-
-        mAiEvents.add("TIMELINE_REQUESTED");
-
-        mAiSnapshotExecutor.execute(() -> {
-            SubtitleSnapshotFetcher.Result result = new SubtitleSnapshotFetcher(
-                    new SubtitleSnapshotReader(), factory)
-                    .fetch(source, format, com.google.android.exoplayer2.C.TIME_UNSET, mAiSnapshotCancelled::get);
-
-            boolean cancelled = mAiSnapshotCancelled.get();
-            // A refused snapshot is diagnostic evidence, so its status survives even though nothing
-            // is displayed (plan section 14: the report must work without a timeline).
-            String status = cancelled ? SubtitleSnapshotReader.Status.CANCELLED.name()
-                    : (result != null && result.getStatus() != null ? result.getStatus().name() : "UNKNOWN");
-
-            mAiSnapshotStatus = status;
-            mAiEvents.add("SNAPSHOT_" + status);
-
-            if (cancelled || !result.isUsable()) {
-                return; // cancelled or unusable: the original subtitles stay
-            }
-
-            mMainHandler.post(() -> {
-                if (!mAiSnapshotCancelled.get() && mAiSubtitleBinder != null) {
-                    mAiSubtitleBinder.setTimeline(result.getTimeline());
-                }
-            });
-        });
     }
 
-    /** Drops the current attempt (seek, source change, release); a later event may fetch again. */
+    /** Drops the current attempt (release, configuration reset) without starting a new one. */
     public void cancelAiSubtitleTimeline() {
-        mAiSnapshotCancelled.set(true);
-        mAiSnapshotRequested = false;
+        if (mAiTimeline != null) {
+            mAiTimeline.cancel();
+        }
+    }
+
+    /**
+     * A new video or a replaced media source: the media generation moves on, so even a track that
+     * looks identical starts a fresh identity and every older attempt is abandoned.
+     */
+    private void invalidateAiSubtitleTimeline() {
+        if (mAiTimeline != null) {
+            mAiTimeline.invalidateSourceContext();
+        }
+    }
+
+    /**
+     * Re-installs the already decoded timeline of the current source. Used when endpoint, model,
+     * target language or the instruction changed: the text is the same, so nothing is fetched again,
+     * but prefetch has to restart for the new configuration (plan 6.3).
+     */
+    public void reinstateAiSubtitleTimeline() {
+        if (mAiSubtitleBinder == null) {
+            return;
+        }
+
+        SubtitleTimeline timeline = mAiSubtitleBinder.getTimelineOfCurrentSource();
+
+        if (timeline != null) {
+            mAiSubtitleBinder.setTimeline(timeline);
+        }
+    }
+
+    private SubtitleTimelineCoordinator aiTimeline() {
+        if (mAiTimeline == null) {
+            if (mAiSnapshotExecutor == null || mAiSnapshotExecutor.isShutdown()) {
+                mAiSnapshotExecutor = Executors.newSingleThreadExecutor();
+            }
+
+            mAiTimeline = new SubtitleTimelineCoordinator(new AiTimelineHost(), mAiSnapshotExecutor,
+                    mMainHandler::post, SubtitleTimelineCoordinator.systemFetcher(), this::onAiTimelineSettled);
+        }
+
+        return mAiTimeline;
+    }
+
+    /** Only accepted attempts may become the current diagnostic state (task N1). */
+    private void onAiTimelineSettled(String status, boolean accepted, boolean installed) {
+        if (accepted) {
+            mAiSnapshotStatus = status;
+        }
+
+        mAiEvents.add((accepted ? "SNAPSHOT_" : "SNAPSHOT_STALE_") + status);
+    }
+
+    /** The player surface as the timeline coordinator needs it. */
+    private final class AiTimelineHost implements SubtitleTimelineCoordinator.Host {
+        @Override
+        public SelectedSubtitleSource getSelectedSource() {
+            PlaybackView player = mPlayer.get();
+
+            return player instanceof AiSubtitleHost ? ((AiSubtitleHost) player).getSelectedSubtitleSource() : null;
+        }
+
+        @Override
+        public com.google.android.exoplayer2.Format getSelectedFormat() {
+            PlaybackView player = mPlayer.get();
+
+            return player instanceof AiSubtitleHost ? ((AiSubtitleHost) player).getSelectedSubtitleFormat() : null;
+        }
+
+        @Override
+        public SubtitleSnapshotFetcher.PayloadFactory createPayloadFactory() {
+            PlaybackView player = mPlayer.get();
+
+            return player instanceof AiSubtitleHost ? ((AiSubtitleHost) player).createSubtitlePayloadFactory() : null;
+        }
+
+        @Override
+        public String getCurrentSourceKey() {
+            return mAiSubtitleBinder != null ? mAiSubtitleBinder.getController().getActiveSourceKey() : null;
+        }
+
+        @Override
+        public SubtitleTimeline getTimelineOfCurrentSource() {
+            return mAiSubtitleBinder != null ? mAiSubtitleBinder.getTimelineOfCurrentSource() : null;
+        }
+
+        @Override
+        public SubtitleTimeline getInstalledTimeline() {
+            return mAiSubtitleBinder != null ? mAiSubtitleBinder.getTimeline() : null;
+        }
+
+        @Override
+        public void installTimeline(SubtitleTimeline timeline) {
+            if (mAiSubtitleBinder != null) {
+                mAiSubtitleBinder.setTimeline(timeline);
+            }
+        }
     }
 
     /** Called by the subtitle menu when the per-video AI switch changes. */
@@ -722,6 +773,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
         mAiEvents.add("ENGINE_RELEASED");
         cancelAiSubtitleTimeline();
+        mAiTimeline = null; // the coordinator and its identity belong to the released surface
 
         if (mAiSnapshotExecutor != null) {
             mAiSnapshotExecutor.shutdownNow(); // the worker thread must not outlive the engine
@@ -772,14 +824,13 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     public void onSeekEnd() {
         AiSubtitleSessionBinder subtitles = aiSubtitleBinder();
 
-        cancelAiSubtitleTimeline(); // an in-flight attempt of the old position must not install late
-
         if (subtitles != null) {
             subtitles.onSeekEnd(); // clear stale translations and drop the carried original text
         }
 
-        // The timeline itself covers the whole source and survives a seek; only when none was obtained
-        // yet is a new attempt started, so the export keeps working after seeking.
+        // The timeline covers the whole source and survives a seek, so an attempt that is already
+        // running for the same source is deliberately neither cancelled nor restarted (task N1); only
+        // when the source has no timeline yet does this start a read.
         requestAiSubtitleTimeline();
 
         process(PlayerEventListener::onSeekEnd);
@@ -824,6 +875,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             subtitles.onVideoLoaded();
         }
 
+        invalidateAiSubtitleTimeline(); // the new video's attempts start from a fresh identity
         requestAiSubtitleTimeline(); // prepare the original timeline without needing the AI switch
 
         process(listener -> listener.onVideoLoaded(item));
@@ -877,14 +929,13 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     public void onTrackChanged(FormatItem track) {
         AiSubtitleSessionBinder subtitles = aiSubtitleBinder();
 
-        cancelAiSubtitleTimeline(); // re-resolve the source's timeline for the new track
-
         if (subtitles != null) {
             subtitles.onTrackChanged(); // same source keeps the session; a new source invalidates it
         }
 
         // The new track needs its own timeline; without this, switching subtitles while AI is on
-        // would silently stop translating until the switch was toggled again.
+        // would silently stop translating until the switch was toggled again. Selecting the same
+        // source again reuses the running or finished read instead of restarting it (task N1).
         requestAiSubtitleTimeline(); // the export needs the original timeline even with AI off
 
         process(listener -> listener.onTrackChanged(track));

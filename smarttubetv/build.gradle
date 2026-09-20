@@ -57,7 +57,11 @@ android {
         applicationId "app.smarttube"
         minSdkVersion project.properties.minSdkVersion
         targetSdkVersion project.properties.targetSdkVersion
-        versionCode 2443
+        // Version strategy (plan 18.6): this number is reserved for the next STABLE release of the
+        // line. CI derives every development/acceptance candidate as (versionCode - 1), so a
+        // candidate installs over anything already released, the following stable still upgrades over
+        // the candidate, and nightly candidates never consume future stable numbers.
+        versionCode 2444
         versionName "32.53"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "long", "TIMESTAMP", System.currentTimeMillis() + "L"

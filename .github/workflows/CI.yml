@@ -1,13 +1,22 @@
-name: Build, test and publish stbeta test APK
+name: Build, test and publish stbeta APK
 
-# Delivery path of plan section 15: compilation, lint, unit tests, APK assembly and
-# signature verification run on GitHub, and the verified APKs are published as a
-# prerelease acceptance candidate. The working branch is production; master is kept so
-# the previous trigger keeps working, and manual dispatch can run any ref.
+# Delivery path of plan sections 15 and 18.6: compilation, lint, unit tests, APK assembly and
+# signature verification run on GitHub, and verified APKs are published as a unique prerelease
+# acceptance candidate. The working branch is production; master is kept so the previous trigger
+# keeps working, and manual dispatch can run any ref.
+#
+# Dispatch input release_mode=true is the final-RC path: it requires the four signing secrets and
+# fails instead of falling back to a debug-signed build, so a stable release candidate can never be
+# produced by accident.
 on:
   push:
     branches: [ "master", "production" ]
   workflow_dispatch:
+    inputs:
+      release_mode:
+        description: 'Publish a stable-signed release candidate (needs the four signing secrets; fails instead of a debug fallback)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,9 +47,9 @@ jobs:
       - name: Required test scope (exoplayer.other)
         run: ./gradlew :common:testStbetaDebugUnitTest --tests "com.liskovsoft.smartyoutubetv2.common.exoplayer.other.*"
 
-      # Informational only: the complete module task carries two pre-existing
-      # ScreensaverManagerTest failures that predate this work, so it must never be read
-      # as "the module is green". The required gate is the step above.
+      # Informational only: the complete module task still carries two pre-existing
+      # ScreensaverManagerTest failures that predate this work, so it must never be read as "the
+      # module is green". The required gate is the step above.
       - name: Full common module suite (informational baseline, known failures)
         continue-on-error: true
         run: ./gradlew :common:testStbetaDebugUnitTest
@@ -63,6 +72,7 @@ jobs:
       contents: write
     env:
       HAS_VT_KEY: ${{ secrets.VIRUS_TOTAL_API_KEY != '' }}
+      RELEASE_MODE: ${{ github.event.inputs.release_mode == 'true' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -76,15 +86,80 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Update Version Name
-        id: get_version
-        run: |
-          # Keep the original code so nightly and original builds stay interchangeable
-          sed -i "s/versionName \"\(.*\)\"/versionName \"\1-nightly-${{ github.run_number }}\"/" smarttubetv/build.gradle
-          echo "VERSION_NAME=$(grep "versionName" smarttubetv/build.gradle | head -n 1 | awk -F'"' '{print $2}')" >> $GITHUB_OUTPUT
-
       - name: Grant Gradle permissions
         run: chmod +x gradlew
+
+      # Version strategy (plan 18.6): versionCode in smarttubetv/build.gradle is the reserved number
+      # of the next STABLE release. Every development/acceptance candidate gets versionCode-1, so a
+      # candidate installs over anything already released and the following stable still upgrades over
+      # the candidate, while nightly candidates never consume future stable numbers.
+      # A stable release candidate keeps the plain versionName, so the accepted APK can be published
+      # as stable with no rebuild.
+      - name: Resolve version, signing and build variant
+        id: version
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+          BASE_CODE=$(grep -oE 'versionCode [0-9]+' smarttubetv/build.gradle | head -1 | awk '{print $2}')
+          BASE_NAME=$(grep -oE 'versionName "[^"]+"' smarttubetv/build.gradle | head -1 | sed -E 's/versionName "([^"]+)"/\1/')
+          if [ -z "$BASE_CODE" ] || [ -z "$BASE_NAME" ]; then
+            echo "::error::Could not read versionCode/versionName from smarttubetv/build.gradle"
+            exit 1
+          fi
+
+          missing=""
+          if [ -z "$SIGNING_KEY" ]; then missing="$missing SIGNING_KEY"; fi
+          if [ -z "$KEY_STORE_PASSWORD" ]; then missing="$missing KEY_STORE_PASSWORD"; fi
+          if [ -z "$KEY_ALIAS" ]; then missing="$missing KEY_ALIAS"; fi
+          if [ -z "$KEY_PASSWORD" ]; then missing="$missing KEY_PASSWORD"; fi
+
+          if [ "$RELEASE_MODE" = "true" ] && [ -n "$missing" ]; then
+            echo "::error::release_mode requested a stable-signed release candidate, but these repository secrets are missing:$missing. No debug fallback is published and nothing is released (plan 18.6)."
+            exit 1
+          fi
+
+          if [ -n "$missing" ]; then
+            echo "::warning::Missing repository secrets:$missing. Publishing a DEBUG-signed development candidate (explicitly not a release candidate)."
+            VERSION_CODE=$((BASE_CODE - 1))
+            VERSION_NAME="$BASE_NAME-nightly-$GITHUB_RUN_NUMBER"
+            BUILD_TASK=":smarttubetv:assembleStbetaDebug"
+            TAG="stbeta-$VERSION_NAME-$GITHUB_RUN_NUMBER-debug"
+            SIGNING_LABEL="**debug-signed development candidate**: the four signing secrets were not configured, so this APK is signed with the AGP debug keystore generated on this runner. It is NOT a stable release candidate, it cannot update a build signed with another key, and a later CI run uses a different debug key. Configure SIGNING_KEY, KEY_STORE_PASSWORD, ALIAS and KEY_PASSWORD for a project-signed candidate."
+          else
+            printf 'storePassword=%s\nkeyAlias=%s\nkeyPassword=%s\nstoreFile=%s\n' \
+              "$KEY_STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" "$GITHUB_WORKSPACE/key.jks" > keystore.properties
+            printf '%s' "$SIGNING_KEY" | base64 --decode > "$GITHUB_WORKSPACE/key.jks"
+            if [ "$RELEASE_MODE" = "true" ]; then
+              VERSION_CODE=$BASE_CODE
+              VERSION_NAME="$BASE_NAME"
+              TAG="stbeta-$BASE_NAME-rc$GITHUB_RUN_NUMBER"
+              SIGNING_LABEL="release build signed with the project signing identity from GitHub Secrets. This is the stable release candidate: the accepted APK is byte-identical to the build that can be published as the stable release."
+            else
+              VERSION_CODE=$((BASE_CODE - 1))
+              VERSION_NAME="$BASE_NAME-nightly-$GITHUB_RUN_NUMBER"
+              TAG="stbeta-$VERSION_NAME-$GITHUB_RUN_NUMBER"
+              SIGNING_LABEL="release build signed with the project signing identity from GitHub Secrets."
+            fi
+            BUILD_TASK=":smarttubetv:assembleStbetaRelease"
+          fi
+
+          sed -i -E "s/versionCode [0-9]+/versionCode $VERSION_CODE/" smarttubetv/build.gradle
+          sed -i -E "s/versionName \"[^\"]+\"/versionName \"$VERSION_NAME\"/" smarttubetv/build.gradle
+
+          {
+            echo "VERSION_CODE=$VERSION_CODE"
+            echo "VERSION_NAME=$VERSION_NAME"
+            echo "BUILD_TASK=$BUILD_TASK"
+            echo "TAG=$TAG"
+            echo "SIGNING_LABEL=$SIGNING_LABEL"
+            echo "RELEASE_MODE=$RELEASE_MODE"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Building $BUILD_TASK as $VERSION_NAME (versionCode $VERSION_CODE)"
 
       - name: Lint (stbeta release)
         run: ./gradlew :common:lintStbetaRelease :smarttubetv:lintStbetaRelease
@@ -97,43 +172,15 @@ jobs:
           path: '**/build/reports/lint-results-*.html'
           if-no-files-found: warn
 
-      # Signs with the project identity when the four secrets exist (plan section 15).
-      # Without them it still produces an installable APK, but as a clearly labelled
-      # debug-signed fallback: the release variant would be unsigned and uninstallable,
-      # and generating a throwaway signing key to hide that is explicitly not allowed.
-      - name: Configure signing and assemble
-        env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          set -e
-          missing=""
-          if [ -z "$SIGNING_KEY" ]; then missing="$missing SIGNING_KEY"; fi
-          if [ -z "$KEY_STORE_PASSWORD" ]; then missing="$missing KEY_STORE_PASSWORD"; fi
-          if [ -z "$KEY_ALIAS" ]; then missing="$missing KEY_ALIAS"; fi
-          if [ -z "$KEY_PASSWORD" ]; then missing="$missing KEY_PASSWORD"; fi
-
-          if [ -n "$missing" ]; then
-            echo "::warning::Missing repository secrets:$missing. Publishing a DEBUG-signed fallback candidate instead of an unsigned release build."
-            {
-              echo "SIGNING_LABEL=**debug-signed fallback**: the four signing secrets were not configured, so this APK is signed with the AGP debug keystore generated on this runner. It cannot update an installed build signed with another key, and a later CI run uses a different debug key. Configure SIGNING_KEY, KEY_STORE_PASSWORD, ALIAS and KEY_PASSWORD to get a project-signed build."
-              echo "TAG_SUFFIX=-debug"
-            } >> "$GITHUB_ENV"
-            ./gradlew clean :smarttubetv:assembleStbetaDebug
-          else
-            printf 'storePassword=%s\nkeyAlias=%s\nkeyPassword=%s\nstoreFile=%s\n' \
-              "$KEY_STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" "$GITHUB_WORKSPACE/key.jks" > keystore.properties
-            printf '%s' "$SIGNING_KEY" | base64 --decode > "$GITHUB_WORKSPACE/key.jks"
-            {
-              echo "SIGNING_LABEL=release build signed with the project signing identity from GitHub Secrets"
-              echo "TAG_SUFFIX="
-            } >> "$GITHUB_ENV"
-            ./gradlew clean :smarttubetv:assembleStbetaRelease
-          fi
+      - name: Assemble the APKs
+        run: ./gradlew clean ${{ steps.version.outputs.BUILD_TASK }}
 
       - name: Verify signatures and build the checksum manifest
+        env:
+          SIGNING_LABEL: ${{ steps.version.outputs.SIGNING_LABEL }}
+          VERSION_NAME: ${{ steps.version.outputs.VERSION_NAME }}
+          VERSION_CODE: ${{ steps.version.outputs.VERSION_CODE }}
+          RELEASE_MODE: ${{ steps.version.outputs.RELEASE_MODE }}
         run: |
           set -e
           APKSIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
@@ -148,7 +195,6 @@ jobs:
           else
             APK_DIR=smarttubetv/build/outputs/apk/stbeta/debug
           fi
-          echo "APK_DIR=$APK_DIR" >> "$GITHUB_ENV"
           echo "Using APKs from $APK_DIR"
 
           mkdir -p publish
@@ -156,9 +202,15 @@ jobs:
           : > NOTES.md
 
           {
-            echo "## SmartTube - stbeta test candidate for T13 acceptance"
+            echo "## SmartTube stbeta $VERSION_NAME (versionCode $VERSION_CODE)"
             echo ""
-            echo "This is a **prerelease test build**, not a release. Commit: $GITHUB_SHA"
+            if [ "$RELEASE_MODE" = "true" ]; then
+              echo "This is the **stable release candidate**: a prerelease for acceptance. The accepted APK is byte-identical to the build that can be published as the stable release."
+            else
+              echo "This is a **prerelease development candidate**, not a release."
+            fi
+            echo ""
+            echo "Commit: $GITHUB_SHA"
             echo ""
             echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo ""
@@ -166,17 +218,17 @@ jobs:
             echo ""
             echo "### What to verify on the TV"
             echo ""
-            echo "1. Long-press the closed-caption button, then use the two new entries at the bottom of the subtitle menu: **Export subtitles** and **Export diagnostic log**."
-            echo "2. After the completion dialog, open a TV file manager and check Documents/SmartTube/Exports/; the dialog shows the exact file name and path."
-            echo "3. The diagnostic export must also work with AI off, without a key and without a subtitle timeline."
-            echo "4. Playback must keep running while an export is in progress."
+            echo "1. Long-press the closed-caption button and use the AI area of the subtitle menu: per-video translation switch, target language, the three display modes, the status line, and the AI settings/config-key entries."
+            echo "2. Configure the service key there (masked input), then play a video with text subtitles and check the original/translated/bilingual modes, seek and track changes."
+            echo "3. Export subtitles and the diagnostic log; the completion dialog shows the exact file name and path under Documents/SmartTube/Exports/."
+            echo "4. The subtitle export must work with AI off and without a key, and playback must keep running while an export is in progress."
             echo ""
             echo "### Known limits of this candidate"
             echo ""
-            echo "- Remote focus, file-manager visibility, storage-permission refusal, out-of-space feedback and playback continuity are **not yet device-verified**: that is what this build is for."
-            echo "- versionCode is the project value and was not bumped, so it installs over an equally versioned build; Android refuses an update signed with a different certificate."
-            echo "- Package name is org.smarttube.beta (stbeta flavor). If a differently signed build with that package is installed, Android refuses this APK: back up before uninstalling anything."
-            echo "- No real DeepSeek request is needed for this feature and the export makes none."
+            echo "- Remote focus, file-manager visibility, storage-permission refusal, out-of-space feedback and playback continuity are device checks; report what you observe."
+            echo "- Version strategy: versionCode $VERSION_CODE. Development candidates use the reserved stable number minus one, so they never consume future stable numbers; the stable release of this line uses the reserved number itself."
+            echo "- Package name is org.smarttube.beta (stbeta flavor). Android refuses an update signed with a different certificate: a debug-signed or official build of the same package must be uninstalled first, which discards its data."
+            echo "- Real DeepSeek calls are only made while translation is switched on and a key is configured."
             echo ""
             echo "### APK metadata and signature"
             echo ""
@@ -208,15 +260,14 @@ jobs:
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION_NAME: ${{ steps.get_version.outputs.VERSION_NAME }}
+          TAG: ${{ steps.version.outputs.TAG }}
+          VERSION_NAME: ${{ steps.version.outputs.VERSION_NAME }}
         run: |
           set -e
-          TAG="stbeta-$VERSION_NAME-$GITHUB_RUN_NUMBER$TAG_SUFFIX"
-          echo "Publishing prerelease $TAG"
           gh release create "$TAG" \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "$VERSION_NAME (T13 acceptance candidate, run $GITHUB_RUN_NUMBER)" \
+            --title "$VERSION_NAME (stbeta acceptance candidate, run $GITHUB_RUN_NUMBER)" \
             --notes-file NOTES.md \
             publish/*.apk SHA256SUMS.txt
           {
@@ -235,12 +286,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: SmartTube_${{ steps.get_version.outputs.VERSION_NAME }}_stbeta
+          name: SmartTube_${{ steps.version.outputs.VERSION_NAME }}_stbeta
           path: publish/*.apk
           if-no-files-found: warn
 
-      # Optional third-party upload. Disabled for the automatic delivery path (plan
-      # section 15); it only runs on an explicit manual dispatch when the key exists.
+      # Optional third-party upload. Disabled for the automatic delivery path (plan section 15);
+      # it only runs on an explicit manual dispatch when the key exists.
       - name: VirusTotal Scan
         if: ${{ env.HAS_VT_KEY == 'true' && github.event_name == 'workflow_dispatch' }}
         uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2 # v5.0.0
