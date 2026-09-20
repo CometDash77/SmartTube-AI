@@ -647,6 +647,9 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 - GitHub Actions 验证已完成（2026-09-20，run 35483822239，commit `a0a1ae60`，conclusion success）：必需测试范围（JDK 11，`--tests "...exoplayer.other.*"`）BUILD SUCCESSFUL；`:common:lintStbetaRelease :smarttubetv:lintStbetaRelease`（JDK 17）BUILD SUCCESSFUL；`:smarttubetv:assembleStbetaDebug` BUILD SUCCESSFUL；`apksigner verify` 对 4 个 APK 全部 "Verifies"（V2 签名证书 SHA-256 `9e8073…`）。整模块套件作为非门禁基线报告为 398 tests / 2 failed（两条既有 `ScreensaverManagerTest`；398 = 原记录 353 + 本次新增 45）。
 - 已交付测试候选：prerelease `stbeta-32.53-nightly-2-2-debug`（指向 `a0a1ae60`，含 universal/arm64-v8a/armeabi-v7a/x86 与 `SHA256SUMS.txt`；universal SHA-256 `5f63c414…`）。因仓库当前**没有任何 Secrets**，按本节规则未发布未签名的 release 包，而是发布带醒目说明的 debug 签名回退候选。
 - 尚未完成（不得读作已通过）：设备验收项为遥控器焦点、一次点击导出、文件管理器可见且可复制、权限拒绝反馈、空间不足反馈、导出期间播放不中断；项目签名身份未配置（需要 `SIGNING_KEY`/`KEY_STORE_PASSWORD`/`ALIAS`/`KEY_PASSWORD`），因此尚无项目签名的 release 候选。
+- 需求更新（2026-09-20，用户明确要求）：**导出字幕必须与 AI 翻译完全解耦**，原文、仅译文、原文+译文、被中断的原文+译文、翻译失败的字幕都要能导出。实现：时间轴改为由字幕事件在后台准备（视频加载/换轨/媒体源替换，以及"尚无时间轴"时的 seek），关闭 AI 开关不再取消在途快照，并在已有时间轴时不重复抓取；ZIP 新增 `untranslated.srt`（仅仍无译文的 cue）与 `translation-status.txt`（逐条 TRANSLATED/FAILED/NOT_ATTEMPTED 及汇总），快照在点击时同时复制译文与状态映射；`NO_TIMELINE` 提示直接显示最近一次快照状态。
+- 与 §14 原约束的关系：导出按钮本身仍不发起任何抓取（"只使用已有数据、零副作用"保持不变，也不触发 DeepSeek 调用）；新增的是一次**字幕事件驱动的后台准备**，因此每个"已选中字幕轨"的源会多一次字幕读取，即 §4.1 早已接受的"每个源快照一次额外读取"扩展到非 AI 场景。这是为了满足"无 Key/无 AI 也能导出原文"的取舍；若要求零额外读取，可改为"仅在按下导出或打开字幕菜单时准备"。
+- 仍未处理：批次级翻译失败原因（401/429 等）未逐条保留，`translation-status.txt` 目前只能区分"尝试过但无结果"与"从未到达"。
 
 
 ## 15. GitHub 编译、签名与 prerelease 交付（最新执行约束）

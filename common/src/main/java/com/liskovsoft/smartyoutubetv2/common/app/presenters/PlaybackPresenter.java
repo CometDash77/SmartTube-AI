@@ -354,6 +354,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             subtitles.onSourceChanged(); // invalidate the previous identity before anyone reacts
         }
 
+        requestAiSubtitleTimeline(); // the export needs the original timeline of the new source
+
         process(listener -> listener.onSourceChanged(item));
     }
 
@@ -387,9 +389,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                     cancelAiSubtitleTimeline();
 
                     // Restart for the new configuration instead of waiting for an unrelated event.
-                    if (mAiSettings.getSettings().isEnabled()) {
-                        requestAiSubtitleTimeline();
-                    }
+                    requestAiSubtitleTimeline();
                 });
         mAiTranslationCache = new SubtitleTranslationCache();
         mAiDispatcher = new SubtitleTranslationDispatcher(new SubtitleBatchPlanner(), mAiTranslationCache,
@@ -424,6 +424,11 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     /**
      * Fetches the timeline of the bound subtitle source once per source snapshot (plan 4.1).
      *
+     * <p>This is deliberately independent of the AI translation switch: the local export needs the
+     * original timeline even for a user who never configures a key, so the fetch is also started by
+     * ordinary subtitle events. A timeline that is already installed for the current source is never
+     * fetched twice.
+     *
      * <p>The fetch runs on a single worker; the timeline is installed on the main thread and only
      * when the attempt was not cancelled meanwhile. An unusable snapshot leaves the original
      * subtitles in place, and no retry loop is started here - a new attempt needs a new event.
@@ -433,6 +438,10 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
         if (!(player instanceof AiSubtitleHost) || mAiSubtitleBinder == null || mAiSnapshotRequested) {
             return;
+        }
+
+        if (mAiSubtitleBinder.getTimeline() != null) {
+            return; // this source already has its timeline; refetching would only cost another read
         }
 
         AiSubtitleHost host = (AiSubtitleHost) player;
@@ -512,8 +521,9 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             mAiLoop.start();
             requestAiSubtitleTimeline(); // prepare the timeline of the source already selected
         } else {
+            // Turning translation off must not discard the original timeline: the local export works
+            // without the AI switch and an in-flight snapshot is a plain subtitle read, not a paid call.
             mAiLoop.stop();
-            cancelAiSubtitleTimeline();
         }
     }
 
@@ -534,6 +544,11 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     /** Session counters of the AI subtitle work, for the menu and the integration report. */
     public SubtitleTranslationStats getAiSubtitleStats() {
         return mAiStats;
+    }
+
+    /** Last completed snapshot outcome (status name), shown by the menu when an export has no timeline. */
+    public String getAiSubtitleSnapshotStatus() {
+        return mAiSnapshotStatus;
     }
 
     /** Milliseconds left of a translation pause (rate limit or repeated failures) for the menu. */
@@ -655,6 +670,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         String targetLanguage = mAiSettings != null ? mAiSettings.getSettings().getTargetLanguage() : null;
         SubtitleTranslationCache cache = mAiTranslationCache;
         Map<String, String> translations = cache != null ? cache.snapshot() : Collections.<String, String>emptyMap();
+        Map<String, String> translationStatus = cache != null ? cache.statusSnapshot() : Collections.<String, String>emptyMap();
         SubtitleTimeline timeline = binder != null ? binder.getTimeline() : null;
         SubtitleExportSnapshot.Counters counters = new SubtitleExportSnapshot.Counters(
                 mAiStats.getRequests(), mAiStats.getDeliveredItems(), mAiStats.getFailedBatches(),
@@ -663,7 +679,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         return new SubtitleExportSnapshot(System.currentTimeMillis(), source,
                 new SubtitleExportSnapshot.Session(aiEnabled, keyConfigured, displayMode, targetLanguage,
                         mAiSnapshotStatus),
-                counters, timeline, translations, mAiEvents.snapshot());
+                counters, timeline, translations, translationStatus, mAiEvents.snapshot());
     }
 
     /**
@@ -756,11 +772,15 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     public void onSeekEnd() {
         AiSubtitleSessionBinder subtitles = aiSubtitleBinder();
 
-        cancelAiSubtitleTimeline(); // the timeline of the old position must never be installed
+        cancelAiSubtitleTimeline(); // an in-flight attempt of the old position must not install late
 
         if (subtitles != null) {
             subtitles.onSeekEnd(); // clear stale translations and drop the carried original text
         }
+
+        // The timeline itself covers the whole source and survives a seek; only when none was obtained
+        // yet is a new attempt started, so the export keeps working after seeking.
+        requestAiSubtitleTimeline();
 
         process(PlayerEventListener::onSeekEnd);
     }
@@ -803,6 +823,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         if (subtitles != null) {
             subtitles.onVideoLoaded();
         }
+
+        requestAiSubtitleTimeline(); // prepare the original timeline without needing the AI switch
 
         process(listener -> listener.onVideoLoaded(item));
     }
@@ -863,9 +885,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
         // The new track needs its own timeline; without this, switching subtitles while AI is on
         // would silently stop translating until the switch was toggled again.
-        if (mAiSettings != null && mAiSettings.getSettings().isEnabled()) {
-            requestAiSubtitleTimeline();
-        }
+        requestAiSubtitleTimeline(); // the export needs the original timeline even with AI off
 
         process(listener -> listener.onTrackChanged(track));
     }

@@ -42,7 +42,7 @@
   <string name="ai_subtitle_export_close">關閉</string>
   <string name="ai_subtitle_export_busy">已有匯出工作正在進行</string>
   <string name="ai_subtitle_export_failed_message">匯出失敗：%1$s</string>
-  <string name="ai_subtitle_export_no_timeline">尚未取得字幕時間軸，請開啟字幕後等待首次快照</string>
+  <string name="ai_subtitle_export_no_timeline">尚未取得字幕時間軸（最近一次快照：%1$s）。原文會自動準備，請等待數秒後重試；匯出原文不需要 Key，也不需要開啟 AI 翻譯</string>
   <string name="ai_subtitle_export_permission_needed">儲存檔案需要儲存權限</string>
   <string name="ai_subtitle_export_permission_purpose">需要儲存權限才能把匯出存到 Documents/SmartTube/Exports</string>
   <string name="ai_subtitle_export_no_space">儲存空間不足</string>

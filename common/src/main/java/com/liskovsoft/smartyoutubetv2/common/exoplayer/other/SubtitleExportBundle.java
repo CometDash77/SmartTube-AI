@@ -16,21 +16,38 @@ import java.util.zip.ZipOutputStream;
 /**
  * Builds the local subtitle archive of one export (plan section 14, T13).
  *
- * <p>The archive reuses the timeline and the translation cache the session already obtained; it never
- * fetches, decodes or translates anything, and it never cancels a request to make the export bigger.
- * When no usable timeline exists the builder refuses instead of writing a successful looking empty
- * archive, because the user must be told that the timeline was not ready.
+ * <p>The archive is produced from the obtained timeline and the translation state of this session; it
+ * never translates and never starts a DeepSeek call. Every state a user can be in is exportable:
+ * original only, translation only, bilingual, a bilingual run that was interrupted halfway, and items
+ * whose translation failed. The archive says which state each cue is in instead of hiding it behind a
+ * silent fallback.
+ *
+ * <p>Entries:
+ * <ul>
+ *     <li>{@link #FILE_ORIGINAL} — the whole obtained timeline.</li>
+ *     <li>{@link #FILE_TRANSLATED} — translation text with the original as fallback, so no cue is blank.</li>
+ *     <li>{@link #FILE_BILINGUAL} — original above translation; the original alone where none exists.</li>
+ *     <li>{@link #FILE_UNTRANSLATED} — only the cues without a translation (the interrupted/failed part).</li>
+ *     <li>{@link #FILE_STATUS} — per-cue status: TRANSLATED / FAILED / NOT_ATTEMPTED.</li>
+ *     <li>{@link #FILE_README} — the coverage and state note.</li>
+ * </ul>
+ *
+ * <p>When no usable timeline exists the builder refuses instead of writing a successful looking empty
+ * archive, because the user has to be told that the timeline was not ready.
  */
 public final class SubtitleExportBundle {
     public static final String FILE_ORIGINAL = "original.srt";
     public static final String FILE_TRANSLATED = "translated.srt";
     public static final String FILE_BILINGUAL = "bilingual.srt";
+    public static final String FILE_UNTRANSLATED = "untranslated.srt";
+    public static final String FILE_STATUS = "translation-status.txt";
     public static final String FILE_README = "README.txt";
     public static final String FILE_NAME_PREFIX = "SmartTube-subtitles-";
     public static final String FILE_EXTENSION = "zip";
     /** API 1 charset: java.nio.charset.StandardCharsets is API 19. */
     private static final Charset UTF_8 = Charset.forName("UTF-8");
     private static final String EOL = "\r\n";
+    private static final String LINE = "\n";
     private static final int MAX_NOTE_VALUE_LENGTH = 64;
 
     /** Local failure of the content build; maps to the stable UI codes of the controller. */
@@ -47,14 +64,19 @@ public final class SubtitleExportBundle {
         private final byte[] mBytes;
         private final List<String> mEntries;
         private final SubtitleSrtFormatter.Coverage mCoverage;
+        private final int mFailedItems;
+        private final int mNotAttemptedItems;
 
-        Result(Failure failure, byte[] bytes, List<String> entries, SubtitleSrtFormatter.Coverage coverage) {
+        Result(Failure failure, byte[] bytes, List<String> entries, SubtitleSrtFormatter.Coverage coverage,
+               int failedItems, int notAttemptedItems) {
             mFailure = failure;
             mBytes = bytes;
             mEntries = entries != null
                     ? Collections.unmodifiableList(new ArrayList<>(entries))
                     : Collections.<String>emptyList();
             mCoverage = coverage;
+            mFailedItems = failedItems;
+            mNotAttemptedItems = notAttemptedItems;
         }
 
         public boolean isSuccess() {
@@ -78,6 +100,16 @@ public final class SubtitleExportBundle {
         public SubtitleSrtFormatter.Coverage getCoverage() {
             return mCoverage;
         }
+
+        /** Items that were attempted at least once without a stored translation. */
+        public int getFailedItems() {
+            return mFailedItems;
+        }
+
+        /** Items the session never attempted (an interrupted or never started run). */
+        public int getNotAttemptedItems() {
+            return mNotAttemptedItems;
+        }
     }
 
     private SubtitleExportBundle() {
@@ -87,15 +119,19 @@ public final class SubtitleExportBundle {
         SubtitleTimeline timeline = snapshot != null ? snapshot.getTimeline() : null;
 
         if (timeline == null || timeline.isEmpty()) {
-            return failure(Failure.NO_TIMELINE, null);
+            return failure(Failure.NO_TIMELINE, null, 0, 0);
         }
 
         Map<String, String> translations = snapshot.getTranslations();
+        Map<String, String> status = snapshot.getTranslationStatus();
         SubtitleSrtFormatter.Coverage coverage = SubtitleSrtFormatter.measure(timeline, translations);
 
         if (coverage.getFrames() == 0) {
-            return failure(Failure.NO_TIMELINE, coverage);
+            return failure(Failure.NO_TIMELINE, coverage, 0, 0);
         }
+
+        int failedItems = countStatus(timeline, status, SubtitleTranslationCache.STATUS_FAILED);
+        int notAttemptedItems = coverage.getMissingItems() - failedItems;
 
         try {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -112,24 +148,56 @@ public final class SubtitleExportBundle {
                         SubtitleSrtFormatter.formatBilingual(timeline, translations).getBytes(UTF_8), entries, modifiedMs);
             }
 
-            put(zip, FILE_README, readme(snapshot, coverage).getBytes(UTF_8), entries, modifiedMs);
+            if (coverage.getMissingItems() > 0) {
+                put(zip, FILE_UNTRANSLATED,
+                        SubtitleSrtFormatter.formatUntranslated(timeline, translations).getBytes(UTF_8), entries, modifiedMs);
+            }
+
+            put(zip, FILE_STATUS, statusNote(snapshot, coverage, failedItems, notAttemptedItems).getBytes(UTF_8),
+                    entries, modifiedMs);
+            put(zip, FILE_README, readme(snapshot, coverage, failedItems, notAttemptedItems).getBytes(UTF_8),
+                    entries, modifiedMs);
             zip.finish();
             zip.close();
 
             byte[] bytes = buffer.toByteArray();
 
             if (bytes.length == 0) {
-                return failure(Failure.ENCODING_FAILED, coverage);
+                return failure(Failure.ENCODING_FAILED, coverage, failedItems, notAttemptedItems);
             }
 
-            return new Result(Failure.NONE, bytes, entries, coverage);
+            return new Result(Failure.NONE, bytes, entries, coverage, failedItems, notAttemptedItems);
         } catch (IOException e) {
-            return failure(Failure.ENCODING_FAILED, coverage);
+            return failure(Failure.ENCODING_FAILED, coverage, failedItems, notAttemptedItems);
         }
     }
 
-    private static Result failure(Failure failure, SubtitleSrtFormatter.Coverage coverage) {
-        return new Result(failure, null, Collections.<String>emptyList(), coverage);
+    private static Result failure(Failure failure, SubtitleSrtFormatter.Coverage coverage, int failedItems,
+                                  int notAttemptedItems) {
+        return new Result(failure, null, Collections.<String>emptyList(), coverage, failedItems, notAttemptedItems);
+    }
+
+    /** Distinct timeline items whose recorded state equals the wanted one. */
+    private static int countStatus(SubtitleTimeline timeline, Map<String, String> status, String wanted) {
+        if (timeline == null || status == null || status.isEmpty()) {
+            return 0;
+        }
+
+        java.util.LinkedHashSet<String> counted = new java.util.LinkedHashSet<>();
+
+        for (SubtitleFrame frame : timeline.getFrames()) {
+            if (frame == null) {
+                continue;
+            }
+
+            for (SubtitleItem item : frame.getItems()) {
+                if (item != null && wanted.equals(status.get(item.getItemId()))) {
+                    counted.add(item.getItemId());
+                }
+            }
+        }
+
+        return counted.size();
     }
 
     private static void put(ZipOutputStream zip, String name, byte[] content, List<String> entries,
@@ -143,11 +211,74 @@ public final class SubtitleExportBundle {
     }
 
     /**
+     * Per-cue state file. It is the answer to "which subtitles are translated, which failed and which
+     * were never reached", and it keeps working when the run was interrupted: such cues simply stay
+     * {@code NOT_ATTEMPTED} instead of being presented as translated.
+     */
+    static String statusNote(SubtitleExportSnapshot snapshot, SubtitleSrtFormatter.Coverage coverage,
+                             int failedItems, int notAttemptedItems) {
+        SubtitleExportSnapshot.Session session = snapshot.getSession();
+        Map<String, String> translations = snapshot.getTranslations();
+        Map<String, String> status = snapshot.getTranslationStatus();
+        StringBuilder out = new StringBuilder();
+
+        out.append("# SmartTube translation status of one export").append(EOL);
+        out.append("# status: ").append(SubtitleTranslationCache.STATUS_TRANSLATED)
+                .append(" = a translation exists; ").append(SubtitleTranslationCache.STATUS_FAILED)
+                .append(" = attempted without a result; NOT_ATTEMPTED = never reached (interrupted run)")
+                .append(EOL);
+        out.append("# index\tstart\tend\tstatus\toriginal").append(EOL);
+
+        int index = 0;
+
+        for (SubtitleFrame frame : snapshot.getTimeline().getFrames()) {
+            List<SubtitleItem> items = frame != null ? frame.getItems() : Collections.<SubtitleItem>emptyList();
+
+            if (items.isEmpty()) {
+                continue;
+            }
+
+            for (SubtitleItem item : items) {
+                if (item == null || SubtitleSrtFormatter.isBlank(item.getText())) {
+                    continue;
+                }
+
+                index++;
+                out.append(index).append('\t')
+                        .append(SubtitleSrtFormatter.formatTimestamp(frame.getStartUs())).append('\t')
+                        .append(SubtitleSrtFormatter.formatTimestamp(frame.getEndUs())).append('\t')
+                        .append(stateOf(status, item.getItemId())).append('\t')
+                        .append(oneLine(item.getText())).append(EOL);
+            }
+        }
+
+        out.append(EOL);
+        out.append("totalItems=").append(coverage.getItems()).append(EOL);
+        out.append("translatedItems=").append(coverage.getTranslatedItems()).append(EOL);
+        out.append("failedItems=").append(failedItems).append(EOL);
+        out.append("notAttemptedItems=").append(Math.max(0, notAttemptedItems)).append(EOL);
+        out.append("coveragePercent=").append(coverage.getCoveragePercent()).append(EOL);
+        out.append("aiTranslationRunningAtExport=").append(session.isAiEnabled()).append(EOL);
+        out.append("keyConfiguredAtExport=").append(session.isKeyConfigured()).append(EOL);
+        out.append("targetLanguageAtExport=").append(value(session.getTargetLanguage())).append(EOL);
+        out.append("subtitleSnapshotStatusAtExport=").append(value(session.getSnapshotStatus())).append(EOL);
+
+        return out.toString();
+    }
+
+    private static String stateOf(Map<String, String> status, String itemId) {
+        String state = status != null ? status.get(itemId) : null;
+
+        return state != null ? state : "NOT_ATTEMPTED";
+    }
+
+    /**
      * The coverage note. It states what was exported, that missing translations fall back to the
      * original, and that the bounded cache may have dropped older results: it never claims that the
      * whole video was translated.
      */
-    static String readme(SubtitleExportSnapshot snapshot, SubtitleSrtFormatter.Coverage coverage) {
+    static String readme(SubtitleExportSnapshot snapshot, SubtitleSrtFormatter.Coverage coverage,
+                         int failedItems, int notAttemptedItems) {
         SubtitleExportSnapshot.Source source = snapshot.getSource();
         SubtitleExportSnapshot.Session session = snapshot.getSession();
         StringBuilder out = new StringBuilder();
@@ -155,10 +286,13 @@ public final class SubtitleExportBundle {
         out.append("SmartTube local subtitle export / SmartTube \u672c\u5730\u5b57\u5e55\u5bfc\u51fa").append(EOL);
         out.append("generatedAt=").append(date(snapshot.getCreatedAtMs())).append(EOL);
         out.append("sourceLanguage=").append(value(source.getLanguageCode())).append(EOL);
+        out.append("sourceMime=").append(value(source.getMimeType())).append(EOL);
         out.append("targetLanguage=").append(value(session.getTargetLanguage())).append(EOL);
         out.append("frames=").append(coverage.getFrames()).append(EOL);
         out.append("items=").append(coverage.getItems()).append(EOL);
         out.append("translatedItems=").append(coverage.getTranslatedItems()).append(EOL);
+        out.append("failedItems=").append(failedItems).append(EOL);
+        out.append("notAttemptedItems=").append(Math.max(0, notAttemptedItems)).append(EOL);
         out.append("missingItems=").append(coverage.getMissingItems()).append(EOL);
         out.append("coveragePercent=").append(coverage.getCoveragePercent()).append(EOL);
         out.append(EOL);
@@ -171,6 +305,13 @@ public final class SubtitleExportBundle {
                 .append(SubtitleTranslationCache.MAX_BYTES)
                 .append(" \u5b57\u8282\uff09\uff0c\u8f83\u65e9\u7684\u8bd1\u6587\u53ef\u80fd\u5df2\u88ab\u6dd8\u6c70\uff1b\u8fd9\u4e0d\u4ee3\u8868\u6574\u90e8\u89c6\u9891\u5df2\u7ffb\u8bd1\u3002").append(EOL);
         out.append("Timecodes reuse the original timeline; the last cue's end is an estimate because the source has no known end. / \u65f6\u95f4\u7801\u6cbf\u7528\u539f\u59cb\u65f6\u95f4\u8f74\uff1b\u6700\u540e\u4e00\u6761\u5b57\u5e55\u7684\u7ed3\u675f\u65f6\u95f4\u4e3a\u4f30\u7b97\u503c\uff0c\u56e0\u4e3a\u6765\u6e90\u6ca1\u6709\u5df2\u77e5\u7ed3\u675f\u65f6\u95f4\u3002").append(EOL);
+        out.append(EOL);
+        out.append("Files: ").append(FILE_ORIGINAL).append(" = original; ").append(FILE_TRANSLATED)
+                .append(" = translation with original fallback; ").append(FILE_BILINGUAL)
+                .append(" = original above translation; ").append(FILE_UNTRANSLATED)
+                .append(" = only the cues still without a translation; ").append(FILE_STATUS)
+                .append(" = per-cue state (TRANSLATED / FAILED / NOT_ATTEMPTED).").append(EOL);
+        out.append("This export does not need the AI switch or an API key, and works with an interrupted or failed translation run. / \u672c\u5bfc\u51fa\u4e0d\u9700\u8981 AI \u5f00\u5173\u6216 API Key\uff0c\u7ffb\u8bd1\u88ab\u4e2d\u65ad\u6216\u5931\u8d25\u65f6\u4e5f\u80fd\u5bfc\u51fa\u3002").append(EOL);
 
         if (coverage.getTranslatedItems() == 0) {
             out.append("No translation was available at export time. / \u5bfc\u51fa\u65f6\u6ca1\u6709\u53ef\u7528\u7684\u8bd1\u6587\u3002").append(EOL);
@@ -200,5 +341,10 @@ public final class SubtitleExportBundle {
         }
 
         return out.length() == 0 ? "unknown" : out.toString();
+    }
+
+    /** Keeps one subtitle line on one row of the status table. */
+    private static String oneLine(String text) {
+        return text == null ? "" : text.replace('\t', ' ').replace(LINE, " / ").replace(EOL, " / ");
     }
 }

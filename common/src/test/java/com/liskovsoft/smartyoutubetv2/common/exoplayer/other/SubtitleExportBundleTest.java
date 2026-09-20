@@ -11,6 +11,7 @@ import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -21,17 +22,22 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-/** T13 acceptance for the exported archive: entries, coverage note and the refusal path. */
+/** T13 acceptance for the exported archive: every translation state, coverage note and refusal path. */
 public class SubtitleExportBundleTest {
     private static final Charset UTF_8 = Charset.forName("UTF-8");
 
     private static SubtitleExportSnapshot snapshot(SubtitleTimeline timeline, Map<String, String> translations) {
+        return snapshot(timeline, translations, Collections.<String, String>emptyMap());
+    }
+
+    private static SubtitleExportSnapshot snapshot(SubtitleTimeline timeline, Map<String, String> translations,
+                                                   Map<String, String> status) {
         return new SubtitleExportSnapshot(1_700_000_000_000L,
                 new SubtitleExportSnapshot.Source(true, "dash", "text/vtt", "en", "a.en", true),
                 new SubtitleExportSnapshot.Session(true, true, SubtitleComposer.MODE_BILINGUAL, "zh-Hans", "OK"),
                 new SubtitleExportSnapshot.Counters(2, 2, 1, 0,
                         translations != null ? translations.size() : 0, 32),
-                timeline, translations, Collections.<String>emptyList());
+                timeline, translations, status, Collections.<String>emptyList());
     }
 
     private static SubtitleTimeline timeline() {
@@ -85,26 +91,30 @@ public class SubtitleExportBundleTest {
     }
 
     @Test
-    public void writesTheOriginalAndTheCoverageNoteWhenNothingIsTranslated() throws IOException {
+    public void writesTheOriginalTheUntranslatedPartAndTheStateFilesWithoutAnyTranslation() throws IOException {
         SubtitleExportBundle.Result result = SubtitleExportBundle.build(
                 snapshot(timeline(), Collections.<String, String>emptyMap()));
 
         assertTrue(result.isSuccess());
-        assertEquals(Arrays.asList(SubtitleExportBundle.FILE_ORIGINAL, SubtitleExportBundle.FILE_README),
-                result.getEntries());
+        assertEquals(Arrays.asList(SubtitleExportBundle.FILE_ORIGINAL, SubtitleExportBundle.FILE_UNTRANSLATED,
+                SubtitleExportBundle.FILE_STATUS, SubtitleExportBundle.FILE_README), result.getEntries());
 
         Map<String, String> entries = unzip(result.getBytes());
         String original = entries.get(SubtitleExportBundle.FILE_ORIGINAL);
+        String untranslated = entries.get(SubtitleExportBundle.FILE_UNTRANSLATED);
         String readme = entries.get(SubtitleExportBundle.FILE_README);
 
         assertTrue(original.contains("One"));
         assertTrue(original.contains("Two"));
         assertTrue("the third item is CJK text", original.contains("\u4e09"));
-        assertEquals(3, SubtitleExportBundle.build(snapshot(timeline(), Collections.<String, String>emptyMap()))
-                .getCoverage().getItems());
+        assertEquals(3, result.getCoverage().getItems());
+        assertTrue("with no translation every cue is listed as still untranslated",
+                untranslated.contains("One") && untranslated.contains("\u4e09"));
         assertTrue(readme.contains("translatedItems=0"));
         assertTrue(readme.contains("coveragePercent=0"));
         assertTrue(readme.contains("missingItems=3"));
+        assertTrue("the export must say it needs neither the switch nor a key",
+                readme.contains("does not need the AI switch or an API key"));
     }
 
     @Test
@@ -117,7 +127,8 @@ public class SubtitleExportBundleTest {
 
         assertTrue(result.isSuccess());
         assertEquals(Arrays.asList(SubtitleExportBundle.FILE_ORIGINAL, SubtitleExportBundle.FILE_TRANSLATED,
-                SubtitleExportBundle.FILE_BILINGUAL, SubtitleExportBundle.FILE_README), result.getEntries());
+                SubtitleExportBundle.FILE_BILINGUAL, SubtitleExportBundle.FILE_UNTRANSLATED,
+                SubtitleExportBundle.FILE_STATUS, SubtitleExportBundle.FILE_README), result.getEntries());
         assertEquals(2, result.getCoverage().getTranslatedItems());
 
         Map<String, String> entries = unzip(result.getBytes());
@@ -127,6 +138,35 @@ public class SubtitleExportBundleTest {
         assertTrue("the untranslated item still appears through the original fallback",
                 entries.get(SubtitleExportBundle.FILE_TRANSLATED).contains("\u4e09"));
         assertTrue(entries.get(SubtitleExportBundle.FILE_BILINGUAL).contains("One\n\u4e00"));
+    }
+
+    @Test
+    public void exportsFailedAndInterruptedStatesInsteadOfHidingThem() throws IOException {
+        Map<String, String> translations = new LinkedHashMap<>();
+        translations.put("a", "\u4e00");
+        Map<String, String> status = new LinkedHashMap<>();
+        status.put("a", SubtitleTranslationCache.STATUS_TRANSLATED);
+        status.put("b", SubtitleTranslationCache.STATUS_FAILED);
+
+        SubtitleExportBundle.Result result = SubtitleExportBundle.build(snapshot(timeline(), translations, status));
+
+        assertTrue(result.isSuccess());
+        assertEquals("one item failed and one was never reached", 1, result.getFailedItems());
+        assertEquals(1, result.getNotAttemptedItems());
+
+        Map<String, String> entries = unzip(result.getBytes());
+        String untranslated = entries.get(SubtitleExportBundle.FILE_UNTRANSLATED);
+        String state = entries.get(SubtitleExportBundle.FILE_STATUS);
+
+        assertFalse("the translated cue stays out of the untranslated file", untranslated.contains("One"));
+        assertTrue(untranslated.contains("Two"));
+        assertTrue(untranslated.contains("\u4e09"));
+        assertTrue(state.contains(SubtitleTranslationCache.STATUS_TRANSLATED));
+        assertTrue(state.contains(SubtitleTranslationCache.STATUS_FAILED));
+        assertTrue(state.contains("NOT_ATTEMPTED"));
+        assertTrue(state.contains("failedItems=1"));
+        assertTrue(state.contains("notAttemptedItems=1"));
+        assertTrue(state.contains("aiTranslationRunningAtExport=true"));
     }
 
     @Test
@@ -148,8 +188,10 @@ public class SubtitleExportBundleTest {
         Map<String, String> entries = unzip(SubtitleExportBundle.build(
                 snapshot(timeline(), Collections.<String, String>emptyMap())).getBytes());
 
-        assertEquals(2, entries.size());
+        assertEquals(4, entries.size());
         assertTrue(entries.containsKey("original.srt"));
+        assertTrue(entries.containsKey("untranslated.srt"));
+        assertTrue(entries.containsKey("translation-status.txt"));
         assertTrue(entries.containsKey("README.txt"));
         assertTrue(entries.get("original.srt").endsWith("\r\n\r\n"));
     }

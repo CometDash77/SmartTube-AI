@@ -262,6 +262,9 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
 
         if (previousKey == null ? currentKey != null : !previousKey.equals(currentKey)) {
             cancelDispatcher(); // the selected source changed: a batch of the old one belongs to it
+            // The timeline of the previous source must never be exported (or prefetched) as the new
+            // source's text; the next fetch installs the timeline that belongs to this source.
+            setTimeline(null);
         }
     }
 }

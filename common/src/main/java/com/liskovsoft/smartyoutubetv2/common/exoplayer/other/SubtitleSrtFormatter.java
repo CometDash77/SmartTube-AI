@@ -136,7 +136,20 @@ public final class SubtitleSrtFormatter {
         return format(timeline, translations, MODE_BILINGUAL);
     }
 
+    /**
+     * Only the cues that still have no translation: the part an interrupted or failing run left
+     * behind, written as playable SRT so a user can see exactly what is missing.
+     */
+    public static String formatUntranslated(SubtitleTimeline timeline, Map<String, String> translations) {
+        return format(timeline, translations, MODE_ORIGINAL, true);
+    }
+
     private static String format(SubtitleTimeline timeline, Map<String, String> translations, int mode) {
+        return format(timeline, translations, mode, false);
+    }
+
+    private static String format(SubtitleTimeline timeline, Map<String, String> translations, int mode,
+                                 boolean onlyMissing) {
         if (timeline == null || timeline.isEmpty()) {
             return "";
         }
@@ -152,6 +165,10 @@ public final class SubtitleSrtFormatter {
             }
 
             List<SubtitleItem> items = visibleItems(frame);
+
+            if (onlyMissing) {
+                items = itemsWithoutTranslation(items, lookup);
+            }
 
             if (items.isEmpty()) {
                 continue; // a clearing boundary is not a cue
@@ -217,6 +234,20 @@ public final class SubtitleSrtFormatter {
         String translation = translations.get(itemId);
 
         return isBlank(translation) ? null : translation;
+    }
+
+    /** Keeps only the items whose lookup has no usable translation. */
+    private static List<SubtitleItem> itemsWithoutTranslation(List<SubtitleItem> items,
+                                                              Map<String, String> translations) {
+        List<SubtitleItem> missing = new ArrayList<>();
+
+        for (SubtitleItem item : items) {
+            if (translationOf(translations, item.getItemId()) == null) {
+                missing.add(item);
+            }
+        }
+
+        return missing;
     }
 
     /** The items that actually carry text; blank ones would only add empty lines. */

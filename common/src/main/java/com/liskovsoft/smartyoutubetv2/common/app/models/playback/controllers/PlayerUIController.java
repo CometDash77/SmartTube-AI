@@ -445,7 +445,8 @@ public class PlayerUIController extends BasePlayerController {
         Context context = getContext();
 
         if (SubtitleExportController.CODE_NO_TIMELINE.equals(failureCode)) {
-            return context.getString(R.string.ai_subtitle_export_no_timeline);
+            // The exact last snapshot result turns one failure report into actionable information.
+            return context.getString(R.string.ai_subtitle_export_no_timeline, snapshotStatusOfTheLastAttempt());
         }
 
         if (SubtitleExportWriteOutcome.Status.PERMISSION_DENIED.name().equals(failureCode)) {
@@ -465,6 +466,13 @@ public class PlayerUIController extends BasePlayerController {
         }
 
         return context.getString(R.string.ai_subtitle_export_failed_unknown);
+    }
+
+    private String snapshotStatusOfTheLastAttempt() {
+        PlaybackPresenter presenter = getPlaybackPresenter();
+        String status = presenter != null ? presenter.getAiSubtitleSnapshotStatus() : null;
+
+        return status != null ? status : "UNKNOWN";
     }
 
     private static int aiSubtitleStatusResId(SubtitleAiMenuState.Status status) {

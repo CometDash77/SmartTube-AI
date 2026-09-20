@@ -42,7 +42,7 @@
     <string name="ai_subtitle_export_close">Close</string>
     <string name="ai_subtitle_export_busy">An export is already running</string>
     <string name="ai_subtitle_export_failed_message">Export failed: %1$s</string>
-    <string name="ai_subtitle_export_no_timeline">No subtitle timeline yet. Turn subtitles on and wait for the first snapshot</string>
+    <string name="ai_subtitle_export_no_timeline">No subtitle timeline yet (last snapshot: %1$s). The original subtitles are prepared automatically; wait a few seconds and try again. Exporting the original needs no key and no AI switch</string>
     <string name="ai_subtitle_export_permission_needed">Storage permission is required to save the file</string>
     <string name="ai_subtitle_export_permission_purpose">Storage access is needed to save the export into Documents/SmartTube/Exports</string>
     <string name="ai_subtitle_export_no_space">Not enough free storage space</string>

@@ -146,6 +146,35 @@ public class SubtitleExportSnapshotTest {
     }
 
     @Test
+    public void cacheStatusClassifiesTranslatedFailedAndNeverAttempted() {
+        SubtitleTranslationCache cache = new SubtitleTranslationCache();
+        cache.put("translated", "\u4e00");
+        cache.recordFailure("failed");
+        cache.recordFailure("failed"); // the attempt budget is used up
+        cache.recordFailure("retrying");
+
+        Map<String, String> status = cache.statusSnapshot();
+
+        assertEquals(SubtitleTranslationCache.STATUS_TRANSLATED, status.get("translated"));
+        assertEquals(SubtitleTranslationCache.STATUS_FAILED, status.get("failed"));
+        assertEquals("an attempted item without a result is failed", SubtitleTranslationCache.STATUS_FAILED,
+                status.get("retrying"));
+        assertNull("an item the session never touched is absent, i.e. NOT_ATTEMPTED", status.get("untouched"));
+    }
+
+    @Test
+    public void theSnapshotCopiesTheStatusMap() {
+        Map<String, String> live = new LinkedHashMap<>();
+        live.put("a", SubtitleTranslationCache.STATUS_FAILED);
+        SubtitleExportSnapshot snapshot = new SubtitleExportSnapshot(1L, null, null, null, null, null, live, null);
+
+        live.put("b", SubtitleTranslationCache.STATUS_TRANSLATED);
+
+        assertEquals(1, snapshot.getTranslationStatus().size());
+        assertEquals(SubtitleTranslationCache.STATUS_FAILED, snapshot.getTranslationStatus().get("a"));
+    }
+
+    @Test
     public void theSnapshotKeepsTheTimelineItWasGiven() {
         SubtitleTimeline timeline = new SubtitleTimeline(Collections.<SubtitleFrame>emptyList(), "fp");
         SubtitleExportSnapshot snapshot = new SubtitleExportSnapshot(1L, null, null, null, timeline, null, null);

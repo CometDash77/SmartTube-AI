@@ -171,11 +171,18 @@ public final class SubtitleExportSnapshot {
     private final Counters mCounters;
     private final SubtitleTimeline mTimeline;
     private final Map<String, String> mTranslations;
+    private final Map<String, String> mTranslationStatus;
     private final List<String> mEvents;
 
     public SubtitleExportSnapshot(long createdAtMs, Source source, Session session, Counters counters,
                                   SubtitleTimeline timeline, Map<String, String> translations,
                                   List<String> events) {
+        this(createdAtMs, source, session, counters, timeline, translations, null, events);
+    }
+
+    public SubtitleExportSnapshot(long createdAtMs, Source source, Session session, Counters counters,
+                                  SubtitleTimeline timeline, Map<String, String> translations,
+                                  Map<String, String> translationStatus, List<String> events) {
         mCreatedAtMs = createdAtMs;
         mSource = source != null ? source : Source.none();
         mSession = session != null ? session : Session.idle();
@@ -184,6 +191,9 @@ public final class SubtitleExportSnapshot {
         mTranslations = translations == null
                 ? Collections.<String, String>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(translations));
+        mTranslationStatus = translationStatus == null
+                ? Collections.<String, String>emptyMap()
+                : Collections.unmodifiableMap(new LinkedHashMap<>(translationStatus));
         mEvents = events == null
                 ? Collections.<String>emptyList()
                 : Collections.unmodifiableList(new ArrayList<>(events));
@@ -214,6 +224,15 @@ public final class SubtitleExportSnapshot {
     /** Immutable copy of the successful translations known at click time. */
     public Map<String, String> getTranslations() {
         return mTranslations;
+    }
+
+    /**
+     * Immutable copy of the per-item translation state known at click time
+     * ({@link SubtitleTranslationCache#STATUS_TRANSLATED} / {@code STATUS_FAILED}); an item that is
+     * absent was never attempted, which is how an interrupted run stays visible in the export.
+     */
+    public Map<String, String> getTranslationStatus() {
+        return mTranslationStatus;
     }
 
     /** Bounded recent event codes (already sanitised to the code alphabet). */

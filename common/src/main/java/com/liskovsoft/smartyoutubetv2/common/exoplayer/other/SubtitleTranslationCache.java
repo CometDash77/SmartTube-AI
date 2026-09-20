@@ -27,6 +27,9 @@ public class SubtitleTranslationCache {
     public static final long MAX_BYTES = 2L * 1024 * 1024L;
     public static final int MAX_FAILURE_ENTRIES = 4_000;
     public static final int MAX_ATTEMPTS = 2;
+    /** Export-visible states of one item; a missing entry means "never attempted". */
+    public static final String STATUS_TRANSLATED = "TRANSLATED";
+    public static final String STATUS_FAILED = "FAILED";
 
     private final LinkedHashMap<String, String> mEntries = new LinkedHashMap<>(16, 0.75f, true);
     private final Map<String, Integer> mAttempts = new HashMap<>();
@@ -75,6 +78,37 @@ public class SubtitleTranslationCache {
      */
     public synchronized Map<String, String> snapshot() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(mEntries));
+    }
+
+    /**
+     * Per-item state for the local export: `TRANSLATED` for a stored non-blank result and
+     * `FAILED` for an item that was attempted at least once without a result. Items absent from the
+     * returned map were never attempted by this session (for example the run was interrupted).
+     */
+    public synchronized Map<String, String> statusSnapshot() {
+        Map<String, String> status = new LinkedHashMap<>();
+
+        for (String itemId : mEntries.keySet()) {
+            String translation = mEntries.get(itemId);
+
+            if (translation != null && !translation.trim().isEmpty()) {
+                status.put(itemId, STATUS_TRANSLATED);
+            }
+        }
+
+        for (String itemId : mAttempts.keySet()) {
+            if (!status.containsKey(itemId)) {
+                status.put(itemId, STATUS_FAILED);
+            }
+        }
+
+        for (String itemId : mExhausted) {
+            if (!status.containsKey(itemId)) {
+                status.put(itemId, STATUS_FAILED);
+            }
+        }
+
+        return Collections.unmodifiableMap(status);
     }
 
     /** Bridges the cache to the frame-to-display alignment without exposing the map. */
