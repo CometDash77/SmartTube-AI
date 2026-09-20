@@ -62,7 +62,7 @@ android {
         // candidate installs over anything already released, the following stable still upgrades over
         // the candidate, and nightly candidates never consume future stable numbers.
         versionCode 2444
-        versionName "32.53"
+        versionName "32.54"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "long", "TIMESTAMP", System.currentTimeMillis() + "L"
 
