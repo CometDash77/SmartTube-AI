@@ -1,5 +1,7 @@
 # AI subtitle implementation — acceptance status against plan section 11
 
+> **Historical matrix — superseded current status:** Later CI results and the latest user-reported failure are indexed in [current status](../subtitle-current-status.md). This matrix retains earlier evidence; statements about missing delivery, failing baseline tests and lint coverage below are historical, not current blockers. Production acceptance has not passed.
+
 Date: 2026-09-20, Asia/Hong_Kong. Scope: what is actually verified today, from which command or test,
 and what is explicitly **not** verified. This is an acceptance matrix, not a progress log; the single
 daily progress record stays in `docs/development/2026-09-20.md`.

@@ -29,12 +29,13 @@ public class SubtitleKeyStoresTest {
         Context context = RuntimeEnvironment.application;
         SubtitleKeyStore store = SubtitleKeyStores.create(context);
 
-        assertTrue("the modern shape is the encrypted store", store.isPersistent());
-
-        boolean saved = store.save("sk-secret-value");
+        assertTrue("a missing keystore must use session storage, not reject every save",
+                store.save("sk-secret-value"));
+        assertTrue(store.hasKey());
+        assertEquals("sk-secret-value", store.getApiKey());
         File file = keyFile(context);
 
-        if (saved) {
+        if (store.isPersistent()) {
             assertTrue("the key is readable again for this session", store.hasKey());
             assertEquals("sk-secret-value", store.getApiKey());
             assertTrue(file.exists());
@@ -42,7 +43,7 @@ public class SubtitleKeyStoresTest {
         } else {
             // No usable keystore in this environment: the store must degrade, not fall back to plaintext.
             assertFalse("no plaintext file may exist", file.exists());
-            assertNull(store.getApiKey());
+            assertEquals("sk-secret-value", store.getApiKey());
         }
 
         store.clear();

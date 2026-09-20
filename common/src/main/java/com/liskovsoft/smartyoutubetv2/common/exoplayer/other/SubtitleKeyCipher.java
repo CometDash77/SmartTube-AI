@@ -5,7 +5,6 @@ import android.os.Build.VERSION_CODES;
 
 import java.nio.charset.Charset;
 import java.security.GeneralSecurityException;
-import java.security.SecureRandom;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
@@ -28,30 +27,22 @@ public class SubtitleKeyCipher {
         SecretKey getKey();
     }
 
-    /** Supplies IV bytes: {@link SecureRandom} in production, deterministic in tests. */
-    public interface RandomSource {
-        byte[] nextBytes(int size);
-    }
-
-    private static final int IV_LENGTH_BYTES = 12;
     private static final int TAG_LENGTH_BITS = 128;
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
 
     private final KeySource mKeySource;
-    private final RandomSource mRandomSource;
+    interface CipherFactory {
+        Cipher create() throws GeneralSecurityException;
+    }
+    private final CipherFactory mCipherFactory;
 
     public SubtitleKeyCipher(KeySource keySource) {
-        this(keySource, size -> {
-            byte[] bytes = new byte[size];
-            new SecureRandom().nextBytes(bytes);
-
-            return bytes;
-        });
+        this(keySource, () -> Cipher.getInstance(TRANSFORMATION));
     }
 
-    SubtitleKeyCipher(KeySource keySource, RandomSource randomSource) {
+    SubtitleKeyCipher(KeySource keySource, CipherFactory cipherFactory) {
         mKeySource = keySource;
-        mRandomSource = randomSource;
+        mCipherFactory = cipherFactory;
     }
 
     /**
@@ -67,9 +58,12 @@ public class SubtitleKeyCipher {
         }
 
         try {
-            byte[] iv = mRandomSource.nextBytes(IV_LENGTH_BYTES);
-            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.ENCRYPT_MODE, mKeySource.getKey(), new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            Cipher cipher = mCipherFactory.create();
+            // AndroidKeyStore requires provider-generated IVs for randomized encryption (the
+            // KeyGenParameterSpec default). A caller-supplied IV makes every save fail there,
+            // even though ordinary JVM AES keys accept it. Keep that security policy enabled.
+            cipher.init(Cipher.ENCRYPT_MODE, mKeySource.getKey());
+            byte[] iv = cipher.getIV();
             byte[] ciphertext = cipher.doFinal(apiKey.trim().getBytes(UTF_8));
 
             return SubtitleKeyEnvelope.pack(SubtitleKeyEnvelope.VERSION, iv, ciphertext);
@@ -94,7 +88,7 @@ public class SubtitleKeyCipher {
         }
 
         try {
-            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            Cipher cipher = mCipherFactory.create();
             cipher.init(Cipher.DECRYPT_MODE, mKeySource.getKey(), new GCMParameterSpec(TAG_LENGTH_BITS, unpacked.getIv()));
             byte[] plaintext = cipher.doFinal(unpacked.getCiphertext());
 

@@ -1,5 +1,7 @@
 # SmartTube 播放器 DeepSeek 字幕翻译开发计划
 
+> **当前安排已替代**：nightly-21 后用户再次报告失败，产品验收未通过。下一步以[当前状态](subtitle-current-status.md)与[生产链重改计划](subtitle-production-rework-plan.md)为准；下文保留历史需求、实现与证据，不能作为最新完成声明。
+
 日期：2026-09-19，Asia/Hong_Kong。交付状态：计划已编写；**2026-09-20 起已按本计划实施**，执行断点、逐任务状态、已验证门禁与未决缺口见文末 **§13 执行状态与断点**。本节的原始计划正文保持原样，未被改写。
 
 执行对象：DeepSeek V4.1 Flash + DeepSeek Harness（DSH）PTC。设计与证据判断由本轮 Astra 完成；DSH 按依赖逐项实现、检查和修正。本文不是新的自动执行授权。

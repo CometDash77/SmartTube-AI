@@ -3,7 +3,6 @@ package com.liskovsoft.smartyoutubetv2.common.exoplayer.other;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.security.SecureRandom;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -98,15 +97,21 @@ public class SubtitleKeyCipherTest {
     }
 
     @Test
-    public void deterministicIvKeepsTheFormatTestable() {
-        byte[] fixedIv = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
-        SubtitleKeyCipher fixed = new SubtitleKeyCipher(() -> mKey, size -> fixedIv.clone());
+    public void encryptionWorksWithAProviderThatRejectsCallerSuppliedIvs() throws Exception {
+        java.security.Provider provider = new RandomizedEncryptionTestProvider();
+        SubtitleKeyCipher restricted = new SubtitleKeyCipher(() -> mKey,
+                () -> javax.crypto.Cipher.getInstance("AES/GCM/NoPadding", provider));
+        String stored = restricted.encrypt("local-placeholder");
+        org.junit.Assert.assertNotNull("AndroidKeyStore's IV policy must permit saving", stored);
+        assertEquals(12, SubtitleKeyEnvelope.unpack(stored).getIv().length);
+        assertEquals("local-placeholder", restricted.decrypt(stored));
+    }
 
-        String first = fixed.encrypt("sk-test-value");
-        String second = fixed.encrypt("sk-test-value");
-
-        assertEquals(first, second);
-        assertEquals("sk-test-value", fixed.decrypt(first));
-        assertEquals(0, new SecureRandom().nextInt(1)); // keep the deterministic path honest
+    @Test(expected = java.security.InvalidAlgorithmParameterException.class)
+    public void restrictedProviderReproducesTheOldEncryptionFailure() throws Exception {
+        javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding",
+                new RandomizedEncryptionTestProvider());
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, mKey,
+                new javax.crypto.spec.GCMParameterSpec(128, new byte[12]));
     }
 }

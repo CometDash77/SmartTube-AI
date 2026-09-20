@@ -1,5 +1,7 @@
 # Reliable review and handoff
 
+> Current subtitle status and next implementation scope: [current status](../plans/subtitle-current-status.md) and [production rework plan](../plans/subtitle-production-rework-plan.md). Historical plan sections below retain delivery constraints, not a claim that TV acceptance passed.
+
 ## Navigation and execution
 
 - Current subtitle requirements and GitHub delivery policy: `docs/plans/deepseek-subtitle-dsh-ptc-plan.md`, sections 14–15. Build/test/lint/package/signature checks run in GitHub Actions; local source and documentation checks do not substitute for CI.

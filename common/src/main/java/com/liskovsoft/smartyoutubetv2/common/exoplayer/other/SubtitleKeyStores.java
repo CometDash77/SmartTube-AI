@@ -29,8 +29,13 @@ public final class SubtitleKeyStores {
                 return null; // the platform keystore key only exists from API 23
             }
 
-            return new PersistentSubtitleKeyStore(
-                    new SubtitleKeyCipher(new SubtitleKeySource(new AndroidKeyStoreAccess())), storage);
+            SubtitleKeySource keySource = new SubtitleKeySource(new AndroidKeyStoreAccess());
+
+            if (keySource.getKey() == null) {
+                return null; // construction alone does not prove that AndroidKeyStore is usable
+            }
+
+            return new PersistentSubtitleKeyStore(new SubtitleKeyCipher(keySource), storage);
         });
     }
 }

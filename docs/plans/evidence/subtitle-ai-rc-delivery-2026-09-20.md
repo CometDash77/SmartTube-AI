@@ -1,6 +1,8 @@
 # AI 字幕 RC 交付记录（2026-09-20）
 
-本文件是**本次交付的唯一权威索引**：候选从哪里下载、怎么校验、对应哪个提交与运行、以及
+> **历史交付记录**：本文件正文的 nightly-16/18 等阶段不再是当前候选索引。nightly-21 与最新失败反馈见[当前状态](../subtitle-current-status.md)，后续按[重改计划](../subtitle-production-rework-plan.md)推进；不得把 debug APK 原样晋升 stable。
+
+本文件是**历史交付阶段的证据索引**：候选从哪里下载、怎么校验、对应哪个提交与运行、以及
 “验收通过后如何把同一 APK 原样发布 stable”。使用与验收步骤见
 [`docs/ai-subtitle-user-guide.md`](../../ai-subtitle-user-guide.md)。
 
