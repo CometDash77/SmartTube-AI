@@ -20,7 +20,8 @@ import static org.junit.Assert.fail;
 public class SubtitleExportSnapshotTest {
     private static SubtitleExportSnapshot snapshot(Map<String, String> translations, List<String> events) {
         return new SubtitleExportSnapshot(1_700_000_000_000L,
-                new SubtitleExportSnapshot.Source(true, "sabr", "application/ttml+xml", "en", "a.en", true),
+                new SubtitleExportSnapshot.Source(SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.BOUND, "sabr", "application/ttml+xml", "en", "a.en", true),
                 new SubtitleExportSnapshot.Session(true, true, SubtitleComposer.MODE_BILINGUAL, "zh-Hans", "OK"),
                 new SubtitleExportSnapshot.Counters(1, 2, 3, 4, translations.size(), 64),
                 new SubtitleTimeline(Collections.<SubtitleFrame>emptyList(), "fp"), translations, events);
@@ -63,6 +64,13 @@ public class SubtitleExportSnapshotTest {
         SubtitleExportSnapshot snapshot = new SubtitleExportSnapshot(1L, null, null, null, null, null, null);
 
         assertFalse(snapshot.getSource().isBound());
+        // "nothing observed" must never be reported as READY and never as a bound source, so a
+        // missing player cannot be mistaken for "the user selected no track" (task R1).
+        assertEquals(SubtitleExportSnapshot.PlayerReadiness.NO_HOST, snapshot.getSource().getReadiness());
+        assertFalse(snapshot.getSource().isSelected());
+        assertEquals(SubtitleSourceBinder.Status.UNBOUND, snapshot.getSource().getStatus());
+        assertFalse(snapshot.getSession().isTimelineRequestInFlight());
+        assertEquals("NOT_REQUESTED", snapshot.getSession().getLastTimelineRequestResult());
         assertFalse(snapshot.getSession().isAiEnabled());
         assertEquals(0, snapshot.getCounters().getCacheEntries());
         assertNull(snapshot.getTimeline());

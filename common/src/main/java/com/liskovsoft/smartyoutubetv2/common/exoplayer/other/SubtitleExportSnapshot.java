@@ -22,20 +22,40 @@ import java.util.Map;
  */
 public final class SubtitleExportSnapshot {
     /**
-     * Source identity that is safe to print: the source type, its declared MIME and its language.
+     * Whether the player surface can be observed at all. It is what keeps "no playback host" from
+     * being reported as "the user did not select a subtitle track" (task R1).
+     */
+    public enum PlayerReadiness {
+        /** The playback surface exists, exposes a subtitle display and has a session binder. */
+        READY,
+        /** No playback surface (`AiSubtitleHost`) is attached; there is nothing to observe. */
+        NO_HOST,
+        /** The surface exists but its subtitle view is not created yet. */
+        NO_DISPLAY,
+        /** The surface is usable but the AI subtitle session was not joined to it yet. */
+        NO_BINDER
+    }
+
+    /**
+     * Source observation that is safe to print: the readiness of the player, whether a subtitle track
+     * is actually selected, the resolved {@link SubtitleSourceBinder.Status} and the source identity.
      * The source base URL is memory-only and is never copied here.
      */
     public static final class Source {
-        private final boolean mBound;
+        private final PlayerReadiness mReadiness;
+        private final boolean mSelected;
+        private final SubtitleSourceBinder.Status mStatus;
         private final String mType;
         private final String mMimeType;
         private final String mLanguageCode;
         private final String mVssId;
         private final boolean mTranslatable;
 
-        public Source(boolean bound, String type, String mimeType, String languageCode, String vssId,
-                      boolean translatable) {
-            mBound = bound;
+        public Source(PlayerReadiness readiness, boolean selected, SubtitleSourceBinder.Status status,
+                      String type, String mimeType, String languageCode, String vssId, boolean translatable) {
+            mReadiness = readiness != null ? readiness : PlayerReadiness.NO_HOST;
+            mSelected = selected;
+            mStatus = status != null ? status : SubtitleSourceBinder.Status.UNBOUND;
             mType = type;
             mMimeType = mimeType;
             mLanguageCode = languageCode;
@@ -43,13 +63,29 @@ public final class SubtitleExportSnapshot {
             mTranslatable = translatable;
         }
 
-        /** No subtitle source is bound (subtitles off, unsupported source or nothing selected). */
+        /** Nothing could be observed: no host, no selected track and no binding. */
         public static Source none() {
-            return new Source(false, null, null, null, null, false);
+            return new Source(PlayerReadiness.NO_HOST, false, SubtitleSourceBinder.Status.UNBOUND,
+                    null, null, null, null, false);
+        }
+
+        /** Readiness of the player surface; never {@link PlayerReadiness#READY} when it is unknown. */
+        public PlayerReadiness getReadiness() {
+            return mReadiness;
+        }
+
+        /** True when a subtitle track is really selected right now (not merely a format object). */
+        public boolean isSelected() {
+            return mSelected;
+        }
+
+        /** Result of resolving the selected track through {@link SubtitleSourceBinder}. */
+        public SubtitleSourceBinder.Status getStatus() {
+            return mStatus;
         }
 
         public boolean isBound() {
-            return mBound;
+            return mStatus == SubtitleSourceBinder.Status.BOUND;
         }
 
         public String getType() {
@@ -80,14 +116,26 @@ public final class SubtitleExportSnapshot {
         private final int mDisplayMode;
         private final String mTargetLanguage;
         private final String mSnapshotStatus;
+        private final String mLastTimelineRequestResult;
+        private final boolean mTimelineRequestInFlight;
 
         public Session(boolean aiEnabled, boolean keyConfigured, int displayMode, String targetLanguage,
                        String snapshotStatus) {
+            this(aiEnabled, keyConfigured, displayMode, targetLanguage, snapshotStatus, "NOT_REQUESTED", false);
+        }
+
+        public Session(boolean aiEnabled, boolean keyConfigured, int displayMode, String targetLanguage,
+                       String snapshotStatus, String lastTimelineRequestResult,
+                       boolean timelineRequestInFlight) {
             mAiEnabled = aiEnabled;
             mKeyConfigured = keyConfigured;
             mDisplayMode = displayMode;
             mTargetLanguage = targetLanguage;
             mSnapshotStatus = snapshotStatus;
+            mLastTimelineRequestResult = lastTimelineRequestResult != null
+                    ? lastTimelineRequestResult
+                    : "NOT_REQUESTED";
+            mTimelineRequestInFlight = timelineRequestInFlight;
         }
 
         /** AI off, no key, no timeline: diagnostics still have to be exportable. */
@@ -115,6 +163,20 @@ public final class SubtitleExportSnapshot {
         public String getSnapshotStatus() {
             return mSnapshotStatus;
         }
+
+        /**
+         * Name of the last timeline request outcome: either a
+         * {@link SubtitleTimelineCoordinator.RequestResult} or the {@code PlayerReadiness} that
+         * refused the request. Reset to {@code NOT_REQUESTED} whenever the media source changes.
+         */
+        public String getLastTimelineRequestResult() {
+            return mLastTimelineRequestResult;
+        }
+
+        /** True while the one timeline read of the selected source is still running. */
+        public boolean isTimelineRequestInFlight() {
+            return mTimelineRequestInFlight;
+        }
     }
 
     /** Counters the diagnostic report is allowed to print; they never contain subtitle text. */
@@ -125,19 +187,48 @@ public final class SubtitleExportSnapshot {
         private final int mCancelledBatches;
         private final int mCacheEntries;
         private final long mCacheBytes;
+        private final int mTimelineRequests;
+        private final int mTimelineInstalls;
+        private final int mTimelineSkips;
 
         public Counters(int requests, int deliveredItems, int failedBatches, int cancelledBatches,
                         int cacheEntries, long cacheBytes) {
+            this(requests, deliveredItems, failedBatches, cancelledBatches, cacheEntries, cacheBytes, 0, 0, 0);
+        }
+
+        /**
+         * @param timelineRequests attempts really started ({@code STARTED} request results only)
+         * @param timelineInstalls installs of the current request, including a reused-timeline install
+         * @param timelineSkips   refusals of a precondition; deduplication and reuse are not skips
+         */
+        public Counters(int requests, int deliveredItems, int failedBatches, int cancelledBatches,
+                        int cacheEntries, long cacheBytes, int timelineRequests, int timelineInstalls,
+                        int timelineSkips) {
             mRequests = requests;
             mDeliveredItems = deliveredItems;
             mFailedBatches = failedBatches;
             mCancelledBatches = cancelledBatches;
             mCacheEntries = cacheEntries;
             mCacheBytes = cacheBytes;
+            mTimelineRequests = timelineRequests;
+            mTimelineInstalls = timelineInstalls;
+            mTimelineSkips = timelineSkips;
         }
 
         public static Counters empty() {
             return new Counters(0, 0, 0, 0, 0, 0);
+        }
+
+        public int getTimelineRequests() {
+            return mTimelineRequests;
+        }
+
+        public int getTimelineInstalls() {
+            return mTimelineInstalls;
+        }
+
+        public int getTimelineSkips() {
+            return mTimelineSkips;
         }
 
         public int getRequests() {

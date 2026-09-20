@@ -1,5 +1,7 @@
 # 第二轮电视验收失败 —— 调试报告（供审查）
 
+> **已独立复核，本文保留为历史报告。** 最新裁决见 [复核报告](subtitle-round2-independent-review-2026-09-20.md)，执行见 [第三轮实施计划](../subtitle-round3-implementation-plan.md)。本报告的失败计数 29、N1 守卫等价及重装清数据定因不成立；最新累计日志实际 12 次失败。用户后续明确确认未输入过 Key，该事实来自用户，不能仅由配置快照推出。
+
 日期：2026-09-20（Asia/Hong_Kong）· 设备：TCL / Android 11 / SDK 30（`tc8000_ay30a2`）
 被测候选：`32.53-nightly-18`（versionCode 2443，tip `666f5177`；上一轮验收候选为 `nightly-16` / `2f64f8a8`）
 报告性质：**调试报告（diagnosis）**，本轮**未修改任何代码**；修复清单交审查者决定后再实施。

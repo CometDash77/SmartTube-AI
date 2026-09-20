@@ -17,6 +17,13 @@ public interface AiSubtitleHost {
     com.google.android.exoplayer2.Format getSelectedSubtitleFormat();
 
     /**
+     * Result of the last {@link SubtitleSourceBinder} resolution. Callers must resolve first
+     * ({@link #getSelectedSubtitleSource()}) so this status belongs to the current selection instead
+     * of an earlier one.
+     */
+    SubtitleSourceBinder.Status getSubtitleSourceStatus();
+
+    /**
      * Payload factory of the AI subtitle snapshot: the player's own data source for the bound source
      * (plan 4.1), or null when this surface cannot provide one.
      */

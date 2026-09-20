@@ -15,6 +15,8 @@ public final class SubtitleAiMenuState {
         NO_KEY,
         /** The key was rejected (401/403) or the balance is exhausted (402): requests stopped. */
         AUTH_FAILED,
+        /** AI is on but the player surface cannot be observed yet (no host, view or binder). */
+        NOT_READY,
         /** AI is on but no subtitle track is bound. */
         NO_SOURCE,
         /** Translation is paused; the original subtitles keep playing. */
@@ -32,6 +34,16 @@ public final class SubtitleAiMenuState {
 
     public static Status of(boolean aiEnabled, boolean sourceBound, boolean keyConfigured,
                             boolean authorizationStopped, long pauseRemainingMs) {
+        return of(aiEnabled, sourceBound, keyConfigured, authorizationStopped, true, pauseRemainingMs);
+    }
+
+    /**
+     * @param playerReady false when host, subtitle view or session binder is missing. A missing
+     *                    player must never be reported as "select a subtitle track" (task R1), so
+     *                    this state comes before {@link Status#NO_SOURCE}.
+     */
+    public static Status of(boolean aiEnabled, boolean sourceBound, boolean keyConfigured,
+                            boolean authorizationStopped, boolean playerReady, long pauseRemainingMs) {
         if (!aiEnabled) {
             return Status.AI_OFF;
         }
@@ -42,6 +54,10 @@ public final class SubtitleAiMenuState {
 
         if (authorizationStopped) {
             return Status.AUTH_FAILED;
+        }
+
+        if (!playerReady) {
+            return Status.NOT_READY;
         }
 
         if (!sourceBound) {
@@ -59,6 +75,6 @@ public final class SubtitleAiMenuState {
     /** True when the state means the user still sees the original subtitles. */
     public static boolean showsOriginalOnly(Status status) {
         return status == Status.AI_OFF || status == Status.NO_KEY || status == Status.AUTH_FAILED
-                || status == Status.NO_SOURCE || status == Status.PAUSED;
+                || status == Status.NOT_READY || status == Status.NO_SOURCE || status == Status.PAUSED;
     }
 }

@@ -65,6 +65,73 @@ public class SubtitleExportController {
     public static final String CODE_ENCODING_FAILED = "ENCODING_FAILED";
     public static final String CODE_FAILED = "EXPORT_FAILED";
 
+    /**
+     * Why a subtitle export had no timeline to write, computed from the click-time snapshot only.
+     *
+     * <p>The distinction matters to the user: "subtitles are off" needs a different action than
+     * "the player is not ready" or "the source is still being prepared". The enum is fixed and holds
+     * no user data (task R2).
+     */
+    public enum FailureReason {
+        /** No snapshot data at all; the menu falls back to its generic message. */
+        UNKNOWN,
+        /** The player surface or its subtitle view was not ready when the button was pressed. */
+        NOT_READY,
+        /** No subtitle track was selected at click time. */
+        NOT_SELECTED,
+        /** A track was selected but its source could not be identified (unknown or ambiguous). */
+        SOURCE_UNSUPPORTED,
+        /** The source was not bound yet, or the selected/status observations disagreed. */
+        SOURCE_UNBOUND,
+        /** The bound source's timeline is still being prepared; retrying later is meaningful. */
+        PREPARING,
+        /** The bound source's preparation already failed or never started; a retry is not automatic. */
+        FAILED
+    }
+
+    /**
+     * Derives the reason from the immutable click-time snapshot: the answer can never change because
+     * the user switched videos while the export was running (task R2).
+     */
+    static FailureReason reasonFor(SubtitleExportSnapshot snapshot) {
+        if (snapshot == null) {
+            return FailureReason.UNKNOWN;
+        }
+
+        SubtitleExportSnapshot.Source source = snapshot.getSource();
+
+        if (source.getReadiness() != SubtitleExportSnapshot.PlayerReadiness.READY) {
+            return FailureReason.NOT_READY;
+        }
+
+        SubtitleSourceBinder.Status status = source.getStatus();
+
+        if (status == SubtitleSourceBinder.Status.NOT_SELECTED) {
+            return FailureReason.NOT_SELECTED;
+        }
+
+        if (status == SubtitleSourceBinder.Status.SOURCE_UNKNOWN
+                || status == SubtitleSourceBinder.Status.SOURCE_AMBIGUOUS) {
+            return FailureReason.SOURCE_UNSUPPORTED;
+        }
+
+        if (status == SubtitleSourceBinder.Status.UNBOUND) {
+            return FailureReason.SOURCE_UNBOUND;
+        }
+
+        if (status == SubtitleSourceBinder.Status.BOUND) {
+            if (!source.isSelected()) {
+                return FailureReason.SOURCE_UNBOUND; // selected/status conflict: do not blame the user
+            }
+
+            return snapshot.getSession().isTimelineRequestInFlight()
+                    ? FailureReason.PREPARING
+                    : FailureReason.FAILED;
+        }
+
+        return FailureReason.UNKNOWN;
+    }
+
     public static final class ExportResult {
         private final Kind mKind;
         private final boolean mSuccess;
@@ -72,26 +139,38 @@ public class SubtitleExportController {
         private final String mLocation;
         private final long mBytes;
         private final String mFailureCode;
+        private final FailureReason mReason;
         private final SubtitleSrtFormatter.Coverage mCoverage;
 
         public ExportResult(Kind kind, boolean success, String fileName, String location, long bytes,
                             String failureCode, SubtitleSrtFormatter.Coverage coverage) {
+            this(kind, success, fileName, location, bytes, failureCode, FailureReason.UNKNOWN, coverage);
+        }
+
+        public ExportResult(Kind kind, boolean success, String fileName, String location, long bytes,
+                            String failureCode, FailureReason reason,
+                            SubtitleSrtFormatter.Coverage coverage) {
             mKind = kind;
             mSuccess = success;
             mFileName = fileName;
             mLocation = location;
             mBytes = bytes;
             mFailureCode = failureCode;
+            mReason = reason != null ? reason : FailureReason.UNKNOWN;
             mCoverage = coverage;
         }
 
         static ExportResult success(Kind kind, String fileName, String location, long bytes,
                                     SubtitleSrtFormatter.Coverage coverage) {
-            return new ExportResult(kind, true, fileName, location, bytes, null, coverage);
+            return new ExportResult(kind, true, fileName, location, bytes, null, FailureReason.UNKNOWN, coverage);
         }
 
         static ExportResult failure(Kind kind, String code) {
-            return new ExportResult(kind, false, null, null, 0, code, null);
+            return new ExportResult(kind, false, null, null, 0, code, FailureReason.UNKNOWN, null);
+        }
+
+        static ExportResult failure(Kind kind, String code, FailureReason reason) {
+            return new ExportResult(kind, false, null, null, 0, code, reason, null);
         }
 
         public Kind getKind() {
@@ -117,6 +196,11 @@ public class SubtitleExportController {
         /** Null when the export succeeded. */
         public String getFailureCode() {
             return mFailureCode;
+        }
+
+        /** Click-time explanation of a "no timeline" failure; never null, {@code UNKNOWN} if absent. */
+        public FailureReason getFailureReason() {
+            return mReason;
         }
 
         /** Coverage of a subtitle export; null for the diagnostic report. */
@@ -224,9 +308,10 @@ public class SubtitleExportController {
         SubtitleExportBundle.Result bundle = SubtitleExportBundle.build(snapshot);
 
         if (!bundle.isSuccess()) {
-            return ExportResult.failure(kind, bundle.getFailure() == SubtitleExportBundle.Failure.NO_TIMELINE
-                    ? CODE_NO_TIMELINE
-                    : CODE_ENCODING_FAILED);
+            return bundle.getFailure() == SubtitleExportBundle.Failure.NO_TIMELINE
+                    // The reason comes from the snapshot taken at click time, never from live state.
+                    ? ExportResult.failure(kind, CODE_NO_TIMELINE, reasonFor(snapshot))
+                    : ExportResult.failure(kind, CODE_ENCODING_FAILED);
         }
 
         return write(kind, SubtitleExportBundle.FILE_NAME_PREFIX, SubtitleExportBundle.FILE_EXTENSION,

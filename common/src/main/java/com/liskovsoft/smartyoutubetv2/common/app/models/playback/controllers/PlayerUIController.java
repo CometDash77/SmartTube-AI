@@ -281,6 +281,17 @@ public class PlayerUIController extends BasePlayerController {
                 option -> getPlaybackPresenter().applyAiEnabled(option.isSelected()),
                 enabled));
 
+        // Two short guides keep the two independent purposes apart: the original export never needs a
+        // key or the AI switch, while AI translation needs a key (task R3).
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_guide_ai), option -> { }));
+
+        if (settings != null) {
+            // The key entry is deliberately near the top of the area and says what it is: the previous
+            // label shared the generic "AI translation settings" text, so it was not recognisable.
+            appendAiKeyEntries(settingsPresenter, settings);
+        }
+
         if (settings != null) {
             SubtitleAiSettingsController settingsController = settings;
             int currentMode = settings.getSettings().getDisplayMode();
@@ -324,13 +335,18 @@ public class PlayerUIController extends BasePlayerController {
 
         if (settings != null) {
             appendAiServiceEntries(settingsPresenter, settings);
-            appendAiKeyEntries(settingsPresenter, settings);
         }
 
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_guide_export), option -> { }));
+
+        // The binding comes from the real resolved source, never from a non-null format object; the
+        // player readiness keeps a missing host from being reported as "no track selected" (task R1).
         SubtitleAiMenuState.Status status = SubtitleAiMenuState.of(enabled,
-                getPlayer() != null && getPlayer().getSubtitleFormat() != null,
+                getPlaybackPresenter().isAiSubtitleSourceBound(),
                 settings != null && settings.isKeyConfigured(),
                 getPlaybackPresenter().isAiSubtitleAuthorizationStopped(),
+                getPlaybackPresenter().isAiSubtitlePlayerReady(),
                 getPlaybackPresenter().getAiSubtitlePauseMs());
 
         settingsPresenter.appendSingleButton(UiOptionItem.from(
@@ -410,19 +426,29 @@ public class PlayerUIController extends BasePlayerController {
      * can hold a stale key (task N2).
      */
     private void appendAiKeyEntries(AppDialogPresenter settingsPresenter, SubtitleAiSettingsController settings) {
+        // The entry itself states whether a key exists and that it can be entered or replaced, so the
+        // user can find it without guessing ("there is nowhere to type a key", task R3).
+        String keyState = getContext().getString(settings.isKeyConfigured()
+                ? R.string.ai_subtitle_key_configured
+                : R.string.ai_subtitle_key_missing);
+
         settingsPresenter.appendSingleButton(UiOptionItem.from(
-                getContext().getString(R.string.ai_subtitle_settings),
+                getContext().getString(R.string.ai_subtitle_key_entry, keyState),
                 option -> SimpleEditDialog.showPassword(getContext(),
-                        getContext().getString(R.string.ai_subtitle_settings),
-                        null,
+                        getContext().getString(R.string.ai_subtitle_key_dialog_title),
+                        getContext().getString(R.string.ai_subtitle_key_hint),
+                        null, // a stored key is never written back into the field
                         newValue -> {
                             if (!settings.saveKey(newValue)) {
                                 MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_key_save_failed);
 
-                                return false;
+                                return false; // keep the dialog open so the value can be corrected
                             }
 
-                            if (!settings.isKeyPersistent()) {
+                            if (settings.isKeyPersistent()) {
+                                MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_key_saved);
+                            } else {
+                                // Never claim persistence the store cannot provide (task R3).
                                 MessageHelpers.showLongMessage(getContext(), R.string.ai_subtitle_key_session_only);
                             }
 
@@ -544,7 +570,7 @@ public class PlayerUIController extends BasePlayerController {
         }
 
         MessageHelpers.showMessage(context, context.getString(
-                R.string.ai_subtitle_export_failed_message, aiSubtitleExportReason(result.getFailureCode())), true);
+                R.string.ai_subtitle_export_failed_message, aiSubtitleExportReason(result)), true);
     }
 
     /**
@@ -560,12 +586,17 @@ public class PlayerUIController extends BasePlayerController {
         dialog.showDialog(title);
     }
 
-    private String aiSubtitleExportReason(String failureCode) {
+    /**
+     * The explanation belongs to the snapshot taken when the button was pressed, so a video or track
+     * change during the export cannot turn A's failure into a statement about B (task R2). Nothing
+     * here reads the presenter's current state.
+     */
+    private String aiSubtitleExportReason(SubtitleExportController.ExportResult result) {
         Context context = getContext();
+        String failureCode = result.getFailureCode();
 
         if (SubtitleExportController.CODE_NO_TIMELINE.equals(failureCode)) {
-            // The exact last snapshot result turns one failure report into actionable information.
-            return context.getString(R.string.ai_subtitle_export_no_timeline, snapshotStatusOfTheLastAttempt());
+            return subtitleExportReasonText(result.getFailureReason());
         }
 
         if (SubtitleExportWriteOutcome.Status.PERMISSION_DENIED.name().equals(failureCode)) {
@@ -587,11 +618,26 @@ public class PlayerUIController extends BasePlayerController {
         return context.getString(R.string.ai_subtitle_export_failed_unknown);
     }
 
-    private String snapshotStatusOfTheLastAttempt() {
-        PlaybackPresenter presenter = getPlaybackPresenter();
-        String status = presenter != null ? presenter.getAiSubtitleSnapshotStatus() : null;
+    /** One actionable message per fixed failure reason; no reason claims preparation always finishes. */
+    private String subtitleExportReasonText(SubtitleExportController.FailureReason reason) {
+        Context context = getContext();
 
-        return status != null ? status : "UNKNOWN";
+        switch (reason) {
+            case NOT_READY:
+                return context.getString(R.string.ai_subtitle_export_not_ready);
+            case NOT_SELECTED:
+                return context.getString(R.string.ai_subtitle_export_not_selected);
+            case SOURCE_UNSUPPORTED:
+                return context.getString(R.string.ai_subtitle_export_source_unsupported);
+            case SOURCE_UNBOUND:
+                return context.getString(R.string.ai_subtitle_export_source_unbound);
+            case PREPARING:
+                return context.getString(R.string.ai_subtitle_export_preparing);
+            case FAILED:
+                return context.getString(R.string.ai_subtitle_export_failed_terminal);
+            default:
+                return context.getString(R.string.ai_subtitle_export_failed_unknown);
+        }
     }
 
     private static int aiSubtitleStatusResId(SubtitleAiMenuState.Status status) {
@@ -604,6 +650,10 @@ public class PlayerUIController extends BasePlayerController {
                 return R.string.ai_subtitle_status_no_source;
             case PAUSED:
                 return R.string.ai_subtitle_status_paused;
+            case NOT_READY:
+                return R.string.ai_subtitle_status_not_ready;
+            case AI_OFF:
+                return R.string.ai_subtitle_status_ai_off;
             case TRANSLATING:
                 return R.string.ai_subtitle_status_translating;
             default:

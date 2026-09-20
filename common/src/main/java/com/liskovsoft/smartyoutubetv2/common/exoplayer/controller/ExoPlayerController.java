@@ -300,6 +300,14 @@ public class ExoPlayerController implements Player.EventListener {
     }
 
     /**
+     * Binding status of the last {@link #getSelectedSubtitleSource()} resolution. {@code getStatus()}
+     * alone only reads the previous result, so callers must resolve first (task R1).
+     */
+    public SubtitleSourceBinder.Status getSubtitleSourceStatus() {
+        return mSubtitleSourceBinder.getStatus();
+    }
+
+    /**
      * Payload factory of the AI subtitle snapshot (plan 4.1): the player's own data source, wrapped as
      * a stream, opened for the exact URL of the bound source. Nothing is fetched here.
      */

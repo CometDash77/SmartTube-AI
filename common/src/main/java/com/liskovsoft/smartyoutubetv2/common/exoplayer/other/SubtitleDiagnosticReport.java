@@ -19,7 +19,8 @@ import java.util.Map;
  * a failed snapshot is exactly the case the user has to be able to report.
  */
 public final class SubtitleDiagnosticReport {
-    public static final int FORMAT_VERSION = 1;
+    /** Version 2 adds the selected/bound/readiness observation and the timeline request counters. */
+    public static final int FORMAT_VERSION = 2;
     public static final String FILE_NAME_PREFIX = "SmartTube-diagnostics-";
     public static final String FILE_EXTENSION = "txt";
     /** API 1 charset: java.nio.charset.StandardCharsets is API 19. */
@@ -33,11 +34,14 @@ public final class SubtitleDiagnosticReport {
             "formatVersion", "generatedAt", "appVersionName", "appVersionCode", "packageName",
             "androidRelease", "androidSdk", "deviceManufacturer", "deviceModel", "storageFreeBytes",
             "aiEnabled", "keyConfigured", "displayMode", "targetLanguage",
-            "sourceBound", "sourceType", "sourceMime", "sourceLanguageCode", "sourceVssId",
+            "sourceBound", "subtitlesSelected", "sourceStatus", "playerReadiness",
+            "sourceType", "sourceMime", "sourceLanguageCode", "sourceVssId",
             "sourceTranslatable", "snapshotStatus",
             "timelineFrames", "timelineItems", "timelineFingerprintPresent",
             "cacheEntries", "cacheBytes", "cacheLimitEntries", "cacheLimitBytes",
             "statsRequests", "statsDeliveredItems", "statsFailedBatches", "statsCancelledBatches",
+            "lastTimelineRequestResult", "timelineRequestInFlight",
+            "timelineRequests", "timelineInstalls", "timelineSkips",
             "eventCount", "event", "excluded"
     };
 
@@ -123,6 +127,7 @@ public final class SubtitleDiagnosticReport {
         out.append("# SmartTube AI subtitle diagnostic report").append(EOL);
         out.append("# Field whitelist only: no API key, Authorization header, cookie, account data, signed URL,").append(EOL);
         out.append("# HTTP body, subtitle text, logcat or preferences are included.").append(EOL);
+        out.append("# The timeline counters below cover the whole process lifetime, not only the current video.").append(EOL);
         out.append("formatVersion=").append(FORMAT_VERSION).append(EOL);
         out.append("generatedAt=").append(snapshot != null ? date(snapshot.getCreatedAtMs()) : "unknown").append(EOL);
         out.append("appVersionName=").append(value(env.getAppVersionName())).append(EOL);
@@ -138,6 +143,9 @@ public final class SubtitleDiagnosticReport {
         out.append("displayMode=").append(displayMode(session.getDisplayMode())).append(EOL);
         out.append("targetLanguage=").append(value(session.getTargetLanguage())).append(EOL);
         out.append("sourceBound=").append(source.isBound()).append(EOL);
+        out.append("subtitlesSelected=").append(source.isSelected()).append(EOL);
+        out.append("sourceStatus=").append(source.getStatus().name()).append(EOL);
+        out.append("playerReadiness=").append(source.getReadiness().name()).append(EOL);
         out.append("sourceType=").append(value(source.getType())).append(EOL);
         out.append("sourceMime=").append(value(source.getMimeType())).append(EOL);
         out.append("sourceLanguageCode=").append(value(source.getLanguageCode())).append(EOL);
@@ -155,6 +163,11 @@ public final class SubtitleDiagnosticReport {
         out.append("statsDeliveredItems=").append(counters.getDeliveredItems()).append(EOL);
         out.append("statsFailedBatches=").append(counters.getFailedBatches()).append(EOL);
         out.append("statsCancelledBatches=").append(counters.getCancelledBatches()).append(EOL);
+        out.append("lastTimelineRequestResult=").append(value(session.getLastTimelineRequestResult())).append(EOL);
+        out.append("timelineRequestInFlight=").append(session.isTimelineRequestInFlight()).append(EOL);
+        out.append("timelineRequests=").append(counters.getTimelineRequests()).append(EOL);
+        out.append("timelineInstalls=").append(counters.getTimelineInstalls()).append(EOL);
+        out.append("timelineSkips=").append(counters.getTimelineSkips()).append(EOL);
         out.append("eventCount=").append(events != null ? events.size() : 0).append(EOL);
 
         if (events != null) {

@@ -33,7 +33,8 @@ public class SubtitleExportBundleTest {
     private static SubtitleExportSnapshot snapshot(SubtitleTimeline timeline, Map<String, String> translations,
                                                    Map<String, String> status) {
         return new SubtitleExportSnapshot(1_700_000_000_000L,
-                new SubtitleExportSnapshot.Source(true, "dash", "text/vtt", "en", "a.en", true),
+                new SubtitleExportSnapshot.Source(SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.BOUND, "dash", "text/vtt", "en", "a.en", true),
                 new SubtitleExportSnapshot.Session(true, true, SubtitleComposer.MODE_BILINGUAL, "zh-Hans", "OK"),
                 new SubtitleExportSnapshot.Counters(2, 2, 1, 0,
                         translations != null ? translations.size() : 0, 32),

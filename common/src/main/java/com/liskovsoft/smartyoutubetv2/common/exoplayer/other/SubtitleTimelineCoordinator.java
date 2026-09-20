@@ -71,6 +71,29 @@ public class SubtitleTimelineCoordinator {
     /** Status reported when an already decoded payload was reused for another source generation. */
     public static final String STATUS_REUSED = "REUSED";
 
+    /**
+     * Fixed outcome of one {@link #request()} call. A plain boolean could not tell a started read
+     * from a deduplicated one, a refused precondition or a missing identity (task R1).
+     */
+    public enum RequestResult {
+        /** A new read of the selected source was started. */
+        STARTED,
+        /** The selected source already has its decoded timeline; nothing had to be fetched. */
+        ALREADY_READY,
+        /** An already decoded timeline of the same payload was re-attributed to a new generation. */
+        REUSED,
+        /** A read of the same source identity is already running: it is reused, not restarted. */
+        IN_FLIGHT,
+        /** No subtitle source is selected (subtitles off, or no track bound). */
+        NO_SOURCE,
+        /** A source is selected but the player does not expose its selected format yet. */
+        NO_FORMAT,
+        /** A source and its format exist but the player cannot open the payload yet. */
+        NO_FACTORY,
+        /** The selected source has no usable identity (missing source key or content locator). */
+        NO_IDENTITY
+    }
+
     /** The production fetch: the real reader over the payload of the selected source. */
     public static Fetcher systemFetcher() {
         return (source, format, payloadFactory, cancellation) -> new SubtitleSnapshotFetcher(
@@ -116,53 +139,64 @@ public class SubtitleTimelineCoordinator {
     /**
      * Starts the read of the currently selected source when it is still needed.
      *
-     * @return true when a new attempt was started
+     * @return the fixed outcome; every refusal reason is distinguished before a slot is taken
      */
-    public boolean request() {
+    public RequestResult request() {
         SelectedSubtitleSource source = mHost.getSelectedSource();
 
         if (source == null) {
             mRequests.cancel(); // subtitles off (or not bound yet): no attempt may outlive it
 
-            return false;
+            return RequestResult.NO_SOURCE;
         }
 
         String locator = locatorOf(source);
+        String sourceKey = mHost.getCurrentSourceKey();
 
         if (mHost.getTimelineOfCurrentSource() != null) {
             mInstalledLocator = locator;
 
-            return false; // this source identity already has its decoded timeline
+            return RequestResult.ALREADY_READY; // this source identity already has its decoded timeline
         }
 
         Format format = mHost.getSelectedFormat();
+
+        if (format == null) {
+            return RequestResult.NO_FORMAT; // the next event may expose the selected format
+        }
+
         SubtitleSnapshotFetcher.PayloadFactory factory = mHost.createPayloadFactory();
 
-        if (format == null || factory == null) {
-            return false; // the player surface cannot describe the payload yet; the next event retries
+        if (factory == null) {
+            return RequestResult.NO_FACTORY; // the surface cannot open the payload yet; retry later
+        }
+
+        if (sourceKey == null || locator == null) {
+            // A request without identity could only be mis-attributed later; the values themselves are
+            // never recorded. A later valid event starts a fresh attempt.
+            return RequestResult.NO_IDENTITY;
         }
 
         // The same payload in another generation (manifest rebuilt, track re-resolved): re-attribute
         // the decoded timeline instead of downloading and decoding the same text again.
         SubtitleTimeline installed = mHost.getInstalledTimeline();
 
-        if (installed != null && locator != null && locator.equals(mInstalledLocator)) {
+        if (installed != null && locator.equals(mInstalledLocator)) {
             mHost.installTimeline(installed);
             mListener.onAttemptSettled(STATUS_REUSED, true, true);
 
-            return false;
+            return RequestResult.REUSED;
         }
 
-        SubtitleTimelineScheduler.Request request = mRequests.begin(mMediaGeneration,
-                mHost.getCurrentSourceKey(), locator);
+        SubtitleTimelineScheduler.Request request = mRequests.begin(mMediaGeneration, sourceKey, locator);
 
         if (request == null) {
-            return false; // the same identity is already in flight: reuse it
+            return RequestResult.IN_FLIGHT; // the same identity is already in flight: reuse it
         }
 
         mWorker.execute(() -> run(request, source, format, factory));
 
-        return true;
+        return RequestResult.STARTED;
     }
 
     private void run(SubtitleTimelineScheduler.Request request, SelectedSubtitleSource source,

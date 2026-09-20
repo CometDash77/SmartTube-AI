@@ -35,9 +35,11 @@ public class SubtitleDiagnosticReportTest {
                 "fingerprint");
 
         return new SubtitleExportSnapshot(1_700_000_000_000L,
-                new SubtitleExportSnapshot.Source(true, "dash", "text/vtt", "en", "a.en", true),
-                new SubtitleExportSnapshot.Session(true, true, SubtitleComposer.MODE_BILINGUAL, "zh-Hans", "OK"),
-                new SubtitleExportSnapshot.Counters(3, 2, 1, 1, translations.size(), 64),
+                new SubtitleExportSnapshot.Source(SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.BOUND, "dash", "text/vtt", "en", "a.en", true),
+                new SubtitleExportSnapshot.Session(true, true, SubtitleComposer.MODE_BILINGUAL, "zh-Hans", "OK",
+                        "ALREADY_READY", true),
+                new SubtitleExportSnapshot.Counters(3, 2, 1, 1, translations.size(), 64, 2, 3, 4),
                 timeline, translations, events.snapshot());
     }
 
@@ -82,6 +84,16 @@ public class SubtitleDiagnosticReportTest {
         assertTrue(report.contains("sourceType=dash"));
         assertTrue(report.contains("sourceMime=text/vtt"));
         assertTrue(report.contains("snapshotStatus=OK"));
+        assertTrue("format version 2", report.contains("formatVersion=2"));
+        assertTrue(report.contains("sourceBound=true"));
+        assertTrue(report.contains("subtitlesSelected=true"));
+        assertTrue(report.contains("sourceStatus=BOUND"));
+        assertTrue(report.contains("playerReadiness=READY"));
+        assertTrue(report.contains("lastTimelineRequestResult=ALREADY_READY"));
+        assertTrue(report.contains("timelineRequestInFlight=true"));
+        assertTrue(report.contains("timelineRequests=2"));
+        assertTrue(report.contains("timelineInstalls=3"));
+        assertTrue(report.contains("timelineSkips=4"));
         assertTrue(report.contains("timelineFrames=2"));
         assertTrue(report.contains("cacheLimitEntries=" + SubtitleTranslationCache.MAX_ENTRIES));
         assertTrue(report.contains("displayMode=BILINGUAL"));
@@ -99,6 +111,12 @@ public class SubtitleDiagnosticReportTest {
         assertTrue(report.contains("aiEnabled=false"));
         assertTrue(report.contains("keyConfigured=false"));
         assertTrue(report.contains("sourceBound=false"));
+        assertTrue("a missing observation is never reported as ready", report.contains("playerReadiness=NO_HOST"));
+        assertTrue(report.contains("subtitlesSelected=false"));
+        assertTrue(report.contains("sourceStatus=UNBOUND"));
+        assertTrue(report.contains("lastTimelineRequestResult=NOT_REQUESTED"));
+        assertTrue(report.contains("timelineRequestInFlight=false"));
+        assertTrue(report.contains("timelineRequests=0"));
         assertTrue(report.contains("snapshotStatus=NOT_REQUESTED"));
         assertTrue(report.contains("eventCount=0"));
         assertTrue(report.contains("appVersionName=unknown"));

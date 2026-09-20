@@ -72,13 +72,13 @@ public class SubtitleTimelineCoordinatorTest {
         SubtitleTimelineCoordinator coordinator = coordinator();
         mHost.select("key-a", "https://example.com/a");
 
-        assertTrue(coordinator.request());
-        assertFalse("the same source must reuse its in-flight read", coordinator.request());
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
+        assertEquals("the same source must reuse its in-flight read", SubtitleTimelineCoordinator.RequestResult.IN_FLIGHT, coordinator.request());
 
         runWorker();
         runMain();
 
-        assertFalse("an installed timeline must not be fetched again", coordinator.request());
+        assertEquals("an installed timeline must not be fetched again", SubtitleTimelineCoordinator.RequestResult.ALREADY_READY, coordinator.request());
         assertEquals(1, mFetcher.calls);
         assertEquals(1, mHost.installs);
         assertEquals("OK", mStatuses.get(0));
@@ -100,7 +100,7 @@ public class SubtitleTimelineCoordinatorTest {
 
         mHost.select("key-b", "https://example.com/b");
         mFetcher.playback = new SubtitleSnapshotFetcher.Result(SubtitleSnapshotReader.Status.OK, timeline("B"));
-        assertTrue(coordinator.request());
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
         runWorker();
 
         // The abandoned answer settles first, exactly like a late callback; then the live one.
@@ -129,13 +129,13 @@ public class SubtitleTimelineCoordinatorTest {
         coordinator.invalidateSourceContext();
         mHost.select("key-b", "https://example.com/b");
         mFetcher.playback = new SubtitleSnapshotFetcher.Result(SubtitleSnapshotReader.Status.OK, timeline("B"));
-        assertTrue(coordinator.request());
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
         runWorker();
 
         runMain(); // the failed attempt of the abandoned source settles now
 
         assertTrue(coordinator.isAttemptInFlight());
-        assertFalse("the live attempt must not be restarted", coordinator.request());
+        assertEquals("the live attempt must not be restarted", SubtitleTimelineCoordinator.RequestResult.IN_FLIGHT, coordinator.request());
         assertEquals(2, mFetcher.calls);
 
         runMain(); // the live attempt settles afterwards
@@ -152,7 +152,7 @@ public class SubtitleTimelineCoordinatorTest {
         mHost.select("key-a", "https://example.com/a");
         mFetcher.playback = new SubtitleSnapshotFetcher.Result(SubtitleSnapshotReader.Status.TIMEOUT, null);
 
-        assertTrue(coordinator.request());
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
         runWorker();
         runMain();
 
@@ -162,7 +162,7 @@ public class SubtitleTimelineCoordinatorTest {
         assertEquals(0, mHost.installs);
 
         mFetcher.playback = new SubtitleSnapshotFetcher.Result(SubtitleSnapshotReader.Status.OK, timeline("A"));
-        assertTrue("an explicit later event may retry", coordinator.request());
+        assertEquals("an explicit later event may retry", SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
         runWorker();
         runMain();
 
@@ -197,7 +197,7 @@ public class SubtitleTimelineCoordinatorTest {
         runWorker(); // the read is in flight; the recorded cancellation must reflect the later event
         mHost.select(null, null);
 
-        assertFalse(coordinator.request());
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.NO_SOURCE, coordinator.request());
 
         assertFalse("no attempt may outlive subtitles-off", coordinator.isAttemptInFlight());
         assertTrue(mFetcher.cancellations.get(0).isCancelled());
@@ -219,7 +219,7 @@ public class SubtitleTimelineCoordinatorTest {
         coordinator.invalidateSourceContext();
         mHost.select("key-a2", "https://example.com/a");
 
-        assertFalse("the same payload must not be downloaded again", coordinator.request());
+        assertEquals("the same payload must not be downloaded again", SubtitleTimelineCoordinator.RequestResult.REUSED, coordinator.request());
         assertEquals("the decoded timeline is re-attributed", 2, mHost.installs);
         assertEquals(1, mFetcher.calls);
         assertEquals(SubtitleTimelineCoordinator.STATUS_REUSED, mStatuses.get(1));
@@ -253,12 +253,76 @@ public class SubtitleTimelineCoordinatorTest {
         mHost.select("key-a", "https://example.com/a");
         mHost.factory = source -> new ByteArrayInputStream(VTT.getBytes(StandardCharsets.UTF_8));
 
-        assertTrue(coordinator.request());
-        assertFalse("the real fetch installed its timeline", coordinator.request());
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
+        assertEquals("the real fetch installed its timeline", SubtitleTimelineCoordinator.RequestResult.ALREADY_READY, coordinator.request());
 
         assertEquals(1, mHost.installs);
         assertEquals("OK", mStatuses.get(0));
         assertEquals("Hello", mHost.installed.frameAt(0).getTexts().get(0));
+    }
+
+    @Test
+    public void anUnsyncedSourceIdentityIsRefusedAndTheNextValidEventRecovers() {
+        SubtitleTimelineCoordinator coordinator = coordinator();
+        mHost.select("key-a", "https://example.com/a");
+        mHost.currentKey = null; // the track is selected but the session has not resolved its identity
+
+        assertEquals("a source without identity must not be fetched under a guessed key",
+                SubtitleTimelineCoordinator.RequestResult.NO_IDENTITY, coordinator.request());
+        assertEquals("a refused request may not start any read", 0, mFetcher.calls);
+
+        // The next real event resolves the identity: the same track is then prepared exactly once.
+        mHost.currentKey = "key-a";
+
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
+        runWorker();
+        runMain();
+
+        assertEquals(1, mFetcher.calls);
+        assertEquals(1, mHost.installs);
+        assertEquals("Hello", mHost.installed.frameAt(0).getTexts().get(0));
+    }
+
+    @Test
+    public void aMissingFormatOrPayloadFactoryIsRefusedBeforeAnythingIsFetched() {
+        SubtitleTimelineCoordinator coordinator = coordinator();
+        mHost.select("key-a", "https://example.com/a");
+
+        mHost.format = null;
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.NO_FORMAT, coordinator.request());
+
+        mHost.format = Format.createTextSampleFormat("en", MimeTypes.TEXT_VTT, 0, "English");
+        mHost.factory = null;
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.NO_FACTORY, coordinator.request());
+        assertEquals("only an accepted request may fetch", 0, mFetcher.calls);
+
+        mHost.factory = source -> new ByteArrayInputStream(VTT.getBytes(StandardCharsets.UTF_8));
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
+        runWorker();
+
+        assertEquals(1, mFetcher.calls);
+    }
+
+    @Test
+    public void aResolvedTrackStartsOneReadAndRepeatedEventsDoNotDuplicateIt() {
+        SubtitleTimelineCoordinator coordinator = coordinator();
+
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.NO_SOURCE, coordinator.request()); // initial CC off
+
+        mHost.select("key-a", "https://example.com/a");
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
+
+        // The player repeats the event (manifest rebuilt, then track changed): no second read.
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.IN_FLIGHT, coordinator.request());
+
+        runWorker();
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.IN_FLIGHT, coordinator.request()); // the attempt has not settled yet
+        runMain();
+
+        assertEquals(SubtitleTimelineCoordinator.RequestResult.ALREADY_READY, coordinator.request());
+
+        assertEquals("the selected track's original timeline is prepared exactly once", 1, mFetcher.calls);
+        assertEquals(1, mHost.installs);
     }
 
     private static SubtitleTimeline timeline(String text) {

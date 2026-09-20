@@ -90,12 +90,42 @@ public class SubtitleExportControllerTest {
     private static SubtitleExportSnapshot snapshot(SubtitleTimeline timeline, Map<String, String> translations,
                                                    boolean aiEnabled, boolean keyConfigured) {
         return new SubtitleExportSnapshot(FIXED_TIME,
-                new SubtitleExportSnapshot.Source(true, "dash", "text/vtt", "en", "a.en", true),
+                new SubtitleExportSnapshot.Source(SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.BOUND, "dash", "text/vtt", "en", "a.en", true),
                 new SubtitleExportSnapshot.Session(aiEnabled, keyConfigured, SubtitleComposer.MODE_BILINGUAL,
                         "zh-Hans", "OK"),
                 new SubtitleExportSnapshot.Counters(1, 1, 0, 0,
                         translations != null ? translations.size() : 0, 16),
                 timeline, translations, new ArrayList<String>());
+    }
+
+    /** Snapshot with an explicit observation, used by the click-time failure-reason tests (task R2). */
+    private static SubtitleExportSnapshot observation(SubtitleTimeline timeline,
+                                                      SubtitleExportSnapshot.PlayerReadiness readiness,
+                                                      boolean selected, SubtitleSourceBinder.Status status,
+                                                      boolean requestInFlight) {
+        return new SubtitleExportSnapshot(FIXED_TIME,
+                new SubtitleExportSnapshot.Source(readiness, selected, status, "dash", "text/vtt", "en", "a.en", true),
+                new SubtitleExportSnapshot.Session(false, false, SubtitleComposer.MODE_ORIGINAL_ONLY, "zh-Hans",
+                        "NOT_REQUESTED", "NOT_REQUESTED", requestInFlight),
+                SubtitleExportSnapshot.Counters.empty(), timeline, new LinkedHashMap<String, String>(),
+                new ArrayList<String>());
+    }
+
+    private static SubtitleExportController.ExportResult exportOnce(SubtitleExportSnapshot value) {
+        HoldingExecutor executor = new HoldingExecutor();
+        RecordingWriter writer = new RecordingWriter();
+        List<Runnable> posted = new ArrayList<>();
+        List<SubtitleExportController.ExportResult> results = new ArrayList<>();
+        SubtitleExportController controller = controller(() -> value, writer, executor, posted, results);
+
+        assertTrue(controller.exportSubtitles(results::add));
+        executor.runAll();
+        posted.get(0).run();
+
+        assertEquals("a refused export must not write a placeholder file", 0, writer.mBaseNames.size());
+
+        return results.get(0);
     }
 
     private static SubtitleExportController controller(SubtitleExportController.SnapshotProvider provider,
@@ -325,5 +355,93 @@ public class SubtitleExportControllerTest {
 
     private static Map<String, String> emptyTranslations() {
         return new LinkedHashMap<>();
+    }
+
+    @Test
+    public void aMissingPlayerIsExplainedAsNotReadyNotAsAnUnselectedTrack() {
+        SubtitleExportController.ExportResult result = exportOnce(observation(null,
+                SubtitleExportSnapshot.PlayerReadiness.NO_HOST, false, SubtitleSourceBinder.Status.UNBOUND, false));
+
+        assertEquals(SubtitleExportController.CODE_NO_TIMELINE, result.getFailureCode());
+        assertEquals(SubtitleExportController.FailureReason.NOT_READY, result.getFailureReason());
+    }
+
+    @Test
+    public void anUnselectedTrackIsExplainedByItsOwnReason() {
+        SubtitleExportController.ExportResult result = exportOnce(observation(null,
+                SubtitleExportSnapshot.PlayerReadiness.READY, false, SubtitleSourceBinder.Status.NOT_SELECTED, false));
+
+        assertEquals(SubtitleExportController.FailureReason.NOT_SELECTED, result.getFailureReason());
+    }
+
+    @Test
+    public void anUnsupportedSourceIsExplainedByItsOwnReason() {
+        assertEquals(SubtitleExportController.FailureReason.SOURCE_UNSUPPORTED,
+                exportOnce(observation(null, SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.SOURCE_UNKNOWN, false)).getFailureReason());
+        assertEquals(SubtitleExportController.FailureReason.SOURCE_UNSUPPORTED,
+                exportOnce(observation(null, SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.SOURCE_AMBIGUOUS, false)).getFailureReason());
+    }
+
+    @Test
+    public void anUnboundSourceIsExplainedByItsOwnReason() {
+        assertEquals(SubtitleExportController.FailureReason.SOURCE_UNBOUND,
+                exportOnce(observation(null, SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.UNBOUND, false)).getFailureReason());
+        // A bound status with nothing selected is a conflict: still not the user's "no track" case.
+        assertEquals(SubtitleExportController.FailureReason.SOURCE_UNBOUND,
+                exportOnce(observation(null, SubtitleExportSnapshot.PlayerReadiness.READY, false,
+                        SubtitleSourceBinder.Status.BOUND, false)).getFailureReason());
+    }
+
+    @Test
+    public void aBoundSourceInFlightIsExplainedAsPreparingAndAFailedOneAsTerminal() {
+        assertEquals(SubtitleExportController.FailureReason.PREPARING,
+                exportOnce(observation(null, SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.BOUND, true)).getFailureReason());
+        assertEquals(SubtitleExportController.FailureReason.FAILED,
+                exportOnce(observation(null, SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.BOUND, false)).getFailureReason());
+    }
+
+    @Test
+    public void theFailureReasonBelongsToTheSnapshotTakenAtClickTime() {
+        HoldingExecutor executor = new HoldingExecutor();
+        RecordingWriter writer = new RecordingWriter();
+        List<Runnable> posted = new ArrayList<>();
+        List<SubtitleExportController.ExportResult> results = new ArrayList<>();
+        // A: a bound source whose preparation failed.
+        final SubtitleExportSnapshot[] current = {observation(null, SubtitleExportSnapshot.PlayerReadiness.READY,
+                true, SubtitleSourceBinder.Status.BOUND, false)};
+        SubtitleExportController controller = controller(() -> current[0], writer, executor, posted, results);
+
+        assertTrue(controller.exportSubtitles(results::add));
+        // The user switches to B (a different video with no subtitles selected) while A is exporting.
+        current[0] = observation(null, SubtitleExportSnapshot.PlayerReadiness.READY, false,
+                SubtitleSourceBinder.Status.NOT_SELECTED, false);
+        executor.runAll();
+        posted.get(0).run();
+
+        assertEquals("A's failure must still be explained by A", SubtitleExportController.FailureReason.FAILED,
+                results.get(0).getFailureReason());
+    }
+
+    @Test
+    public void aReadyOriginalExportsWithAiOffAndNoKey() throws IOException {
+        HoldingExecutor executor = new HoldingExecutor();
+        RecordingWriter writer = new RecordingWriter();
+        List<Runnable> posted = new ArrayList<>();
+        List<SubtitleExportController.ExportResult> results = new ArrayList<>();
+        // The acceptance case of round 3: original export never requires a key or the AI switch.
+        SubtitleExportController controller = controller(
+                () -> snapshot(timeline("Hello"), emptyTranslations(), false, false), writer, executor, posted, results);
+
+        assertTrue(controller.exportSubtitles(results::add));
+        executor.runAll();
+        posted.get(0).run();
+
+        assertTrue(results.get(0).isSuccess());
+        assertTrue(zipEntryNames(writer.mPayloads.get(0)).contains(SubtitleExportBundle.FILE_ORIGINAL));
     }
 }

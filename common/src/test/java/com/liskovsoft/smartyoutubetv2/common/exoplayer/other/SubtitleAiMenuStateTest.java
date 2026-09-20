@@ -58,6 +58,23 @@ public class SubtitleAiMenuStateTest {
     }
 
     @Test
+    public void anUnreadyPlayerIsReportedBeforeAMissingSource() {
+        // playerReady covers host, subtitle view and session binder: a missing one must not be
+        // reported as "select a subtitle track" (task R1).
+        assertEquals(SubtitleAiMenuState.Status.NOT_READY,
+                SubtitleAiMenuState.of(true, false, true, false, false, 0));
+        assertTrue(SubtitleAiMenuState.showsOriginalOnly(SubtitleAiMenuState.Status.NOT_READY));
+
+        // The missing key stays first, because the key entry is actionable in every state.
+        assertEquals(SubtitleAiMenuState.Status.NO_KEY,
+                SubtitleAiMenuState.of(true, false, false, false, false, 0));
+
+        // A ready player keeps the existing behaviour.
+        assertEquals(SubtitleAiMenuState.Status.NO_SOURCE,
+                SubtitleAiMenuState.of(true, false, true, false, true, 0));
+    }
+
+    @Test
     public void everyStateExceptTranslatingStillShowsTheOriginal() {
         assertFalse(SubtitleAiMenuState.showsOriginalOnly(SubtitleAiMenuState.Status.TRANSLATING));
         assertTrue(SubtitleAiMenuState.showsOriginalOnly(SubtitleAiMenuState.Status.AI_OFF));

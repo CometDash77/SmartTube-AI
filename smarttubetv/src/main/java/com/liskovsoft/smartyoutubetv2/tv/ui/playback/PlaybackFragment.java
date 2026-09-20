@@ -63,6 +63,7 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSou
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotFetcher;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleDisplay;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleManager;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSourceBinder;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.versions.renderer.CustomOverridesRenderersFactory;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.versions.selector.RestoreTrackSelector;
@@ -1382,6 +1383,11 @@ public class PlaybackFragment extends SeekModePlaybackFragment implements Playba
     @Override
     public com.google.android.exoplayer2.Format getSelectedSubtitleFormat() {
         return mExoPlayerController != null ? mExoPlayerController.getSelectedSubtitleFormat() : null;
+    }
+
+    @Override
+    public SubtitleSourceBinder.Status getSubtitleSourceStatus() {
+        return mExoPlayerController != null ? mExoPlayerController.getSubtitleSourceStatus() : null;
     }
 
     @Override

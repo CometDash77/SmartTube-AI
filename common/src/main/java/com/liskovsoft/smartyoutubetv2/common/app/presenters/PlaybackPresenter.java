@@ -12,6 +12,7 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleHandlerSche
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitlePrefetchLoop;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotFetcher;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSourceBinder;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTimelineCoordinator;
 
 import java.util.concurrent.ExecutorService;
@@ -101,6 +102,18 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private final SubtitleExportEventLog mAiEvents = new SubtitleExportEventLog(android.os.SystemClock::elapsedRealtime);
     /** Outcome of the last snapshot attempt; the diagnostic report prints it instead of guessing. */
     private volatile String mAiSnapshotStatus = "NOT_REQUESTED";
+    /** Fixed outcome of the last {@code requestAiSubtitleTimeline()} call; never a free-form value. */
+    private volatile String mAiTimelineRequestResult = "NOT_REQUESTED";
+    /** Timeline attempts really started (process lifetime, so it is not a per-video count). */
+    private int mAiTimelineRequests;
+    /** Timeline installs of the current request, including an install of a reused timeline. */
+    private int mAiTimelineInstalls;
+    /** Refused preconditions only; deduplication and reuse are deliberately not counted here. */
+    private int mAiTimelineSkips;
+    /** Last skip event code, so repeated refusals do not fill the bounded event ring (task R1). */
+    private String mAiTimelineLastSkipCode;
+    /** Last observed subtitle visibility; null means "unknown after a source change". */
+    private Boolean mAiSubtitlesVisible;
     private SubtitleExportController mAiExport;
     private ExecutorService mAiExportExecutor;
     private final android.os.Handler mMainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -353,6 +366,9 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
         invalidateAiSubtitleTimeline(); // a new media source invalidates the fetched timeline too
         mAiSnapshotStatus = "NOT_REQUESTED";
+        mAiTimelineRequestResult = "NOT_REQUESTED";
+        mAiTimelineLastSkipCode = null;
+        mAiSubtitlesVisible = null; // visibility is unknown again until the tracks settle
         mAiEvents.add("SOURCE_CHANGED");
 
         if (subtitles != null) {
@@ -451,14 +467,46 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
      * diagnostic status.
      */
     public void requestAiSubtitleTimeline() {
-        if (mAiSubtitleBinder == null) {
-            return; // no playback surface bound the subtitle source
+        SubtitleExportSnapshot.PlayerReadiness readiness = playerReadiness();
+
+        if (readiness != SubtitleExportSnapshot.PlayerReadiness.READY) {
+            // A missing host or subtitle view must never be reported as "no subtitle track selected".
+            recordAiTimelineSkip(readiness.name());
+
+            return;
         }
 
-        if (aiTimeline().request()) {
-            // A refused snapshot is diagnostic evidence, so its status survives even though nothing is
-            // displayed (plan section 14: the report must work without a timeline).
-            mAiEvents.add("TIMELINE_REQUESTED");
+        SubtitleTimelineCoordinator.RequestResult result = aiTimeline().request();
+
+        mAiTimelineRequestResult = result.name();
+        mAiTimelineLastSkipCode = null;
+
+        switch (result) {
+            case STARTED:
+                // A refused snapshot is diagnostic evidence, so its status survives even though nothing
+                // is displayed (plan section 14: the report must work without a timeline).
+                mAiTimelineRequests++;
+                mAiEvents.add("TIMELINE_REQUESTED");
+                return;
+            case REUSED:
+            case ALREADY_READY:
+            case IN_FLIGHT:
+                return; // deduplication and reuse are neither errors nor skipped preconditions
+            default:
+                recordAiTimelineSkip(result.name());
+        }
+    }
+
+    /** Counts a refusal and records it once per distinct code, so repeated events cannot flood. */
+    private void recordAiTimelineSkip(String result) {
+        mAiTimelineSkips++;
+        mAiTimelineRequestResult = result;
+
+        String code = "TIMELINE_SKIP_" + result;
+
+        if (!code.equals(mAiTimelineLastSkipCode)) {
+            mAiEvents.add(code);
+            mAiTimelineLastSkipCode = code;
         }
     }
 
@@ -576,7 +624,66 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             mAiSnapshotStatus = status;
         }
 
+        if (accepted && installed) {
+            // Includes the reused install: the timeline is in place for the current source afterwards.
+            mAiTimelineInstalls++;
+        }
+
         mAiEvents.add((accepted ? "SNAPSHOT_" : "SNAPSHOT_STALE_") + status);
+    }
+
+    /**
+     * Whether the player surface can be observed at all. This is what keeps a missing host or
+     * subtitle view from being reported as "the user did not select a subtitle track" (task R1).
+     */
+    private SubtitleExportSnapshot.PlayerReadiness playerReadiness() {
+        PlaybackView player = mPlayer.get();
+
+        if (!(player instanceof AiSubtitleHost)) {
+            return SubtitleExportSnapshot.PlayerReadiness.NO_HOST;
+        }
+
+        if (mAiSubtitleBinder == null) {
+            return ((AiSubtitleHost) player).getSubtitleDisplay() == null
+                    ? SubtitleExportSnapshot.PlayerReadiness.NO_DISPLAY
+                    : SubtitleExportSnapshot.PlayerReadiness.NO_BINDER;
+        }
+
+        return SubtitleExportSnapshot.PlayerReadiness.READY;
+    }
+
+    /**
+     * True when the selected subtitle track resolves to a bound source. The menu must ask this instead
+     * of treating a non-null format object as a bound track (task R1).
+     */
+    public boolean isAiSubtitleSourceBound() {
+        PlaybackView player = mPlayer.get();
+
+        return player instanceof AiSubtitleHost
+                && ((AiSubtitleHost) player).getSelectedSubtitleSource() != null;
+    }
+
+    /** True when host, subtitle view and session binder are all available. */
+    public boolean isAiSubtitlePlayerReady() {
+        return playerReadiness() == SubtitleExportSnapshot.PlayerReadiness.READY;
+    }
+
+    /**
+     * Records SUBTITLES_ON/OFF only when the real visibility state changed. A selected track and
+     * visible subtitles are different concepts, so this event is never proof that a source is bound,
+     * and neither a tick nor a repeated menu redraw may emit it (task R1).
+     */
+    private void trackAiSubtitleVisibility() {
+        PlaybackView player = mPlayer.get();
+        boolean visible = player instanceof AiSubtitleHost
+                && ((AiSubtitleHost) player).getSelectedSubtitleFormat() != null;
+
+        if (mAiSubtitlesVisible != null && mAiSubtitlesVisible == visible) {
+            return;
+        }
+
+        mAiSubtitlesVisible = visible;
+        mAiEvents.add(visible ? "SUBTITLES_ON" : "SUBTITLES_OFF");
     }
 
     /** The player surface as the timeline coordinator needs it. */
@@ -783,16 +890,27 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private SubtitleExportSnapshot buildAiExportSnapshot() {
         AiSubtitleSessionBinder binder = mAiSubtitleBinder;
         PlaybackView player = mPlayer.get();
+        SubtitleExportSnapshot.PlayerReadiness readiness = playerReadiness();
+        boolean selected = false;
+        SubtitleSourceBinder.Status sourceStatus = SubtitleSourceBinder.Status.UNBOUND;
         SubtitleExportSnapshot.Source source = SubtitleExportSnapshot.Source.none();
 
-        if (player instanceof AiSubtitleHost) {
-            SelectedSubtitleSource selected = ((AiSubtitleHost) player).getSelectedSubtitleSource();
+        if (readiness == SubtitleExportSnapshot.PlayerReadiness.READY) {
+            AiSubtitleHost host = (AiSubtitleHost) player;
+            // Resolve first, then read the status: getStatus() alone only repeats an earlier result.
+            SelectedSubtitleSource selectedSource = host.getSelectedSubtitleSource();
+            SubtitleSourceBinder.Status resolved = host.getSubtitleSourceStatus();
 
-            if (selected != null) {
-                // The base URL stays where it belongs (memory only): the snapshot keeps the safe parts.
-                source = new SubtitleExportSnapshot.Source(true, selected.getType(), selected.getMimeType(),
-                        selected.getLanguageCode(), selected.getVssId(), selected.isTranslatable());
-            }
+            selected = host.getSelectedSubtitleFormat() != null;
+            sourceStatus = resolved != null ? resolved : SubtitleSourceBinder.Status.UNBOUND;
+
+            // The base URL stays where it belongs (memory only): the snapshot keeps the safe parts.
+            source = new SubtitleExportSnapshot.Source(readiness, selected, sourceStatus,
+                    selectedSource != null ? selectedSource.getType() : null,
+                    selectedSource != null ? selectedSource.getMimeType() : null,
+                    selectedSource != null ? selectedSource.getLanguageCode() : null,
+                    selectedSource != null ? selectedSource.getVssId() : null,
+                    selectedSource != null && selectedSource.isTranslatable());
         }
 
         boolean aiEnabled = binder != null && binder.getController().isAiEnabled();
@@ -805,11 +923,13 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         SubtitleTimeline timeline = binder != null ? binder.getTimelineOfCurrentSource() : null;
         SubtitleExportSnapshot.Counters counters = new SubtitleExportSnapshot.Counters(
                 mAiStats.getRequests(), mAiStats.getDeliveredItems(), mAiStats.getFailedBatches(),
-                mAiStats.getCancelledBatches(), translations.size(), cache != null ? cache.getBytes() : 0);
+                mAiStats.getCancelledBatches(), translations.size(), cache != null ? cache.getBytes() : 0,
+                mAiTimelineRequests, mAiTimelineInstalls, mAiTimelineSkips);
+        boolean requestInFlight = mAiTimeline != null && mAiTimeline.isAttemptInFlight();
 
         return new SubtitleExportSnapshot(System.currentTimeMillis(), source,
                 new SubtitleExportSnapshot.Session(aiEnabled, keyConfigured, displayMode, targetLanguage,
-                        mAiSnapshotStatus),
+                        mAiSnapshotStatus, mAiTimelineRequestResult, requestInFlight),
                 counters, timeline, translations, translationStatus, mAiEvents.snapshot());
     }
 
@@ -867,6 +987,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         }
 
         mIsAiSubtitleChainReady = false;
+
+        mAiSubtitlesVisible = null; // a rebuilt engine reports its visibility again
 
         if (mAiSubtitleBinder != null) {
             mAiSubtitleBinder.onEngineReleased();
@@ -1013,6 +1135,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         if (subtitles != null) {
             subtitles.onTrackChanged(); // same source keeps the session; a new source invalidates it
         }
+
+        trackAiSubtitleVisibility(); // a real visibility change, never a tick or a menu redraw
 
         // The new track needs its own timeline; without this, switching subtitles while AI is on
         // would silently stop translating until the switch was toggled again. Selecting the same

@@ -36,6 +36,16 @@ public class SimpleEditDialog {
         show(context, dialogTitle, dialogTitle, defaultValue, onChange, onDismiss, true);
     }
 
+    /**
+     * Masked input with its own hint. The legacy signatures stay unchanged: they keep using the title
+     * as the hint, so no existing caller changes behaviour. The input is never prefilled with a
+     * stored secret.
+     */
+    public static void showPassword(Context context, String dialogTitle, String dialogHint,
+                                    String defaultValue, OnChange onChange) {
+        show(context, dialogTitle, dialogHint != null ? dialogHint : dialogTitle, defaultValue, onChange, null, true);
+    }
+
     private static void show(Context context, String dialogTitle, String dialogHint, String defaultValue, OnChange onChange, Runnable onDismiss, boolean isPassword) {
         AlertDialog.Builder builder = new AlertDialog.Builder(context, R.style.AppDialog);
         LayoutInflater inflater = LayoutInflater.from(context);
