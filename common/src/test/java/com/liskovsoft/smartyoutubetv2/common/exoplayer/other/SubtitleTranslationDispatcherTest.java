@@ -126,6 +126,64 @@ public class SubtitleTranslationDispatcherTest {
     }
 
     @Test
+    public void aContentInvalidationDropsTheInFlightAnswerAndFreesTheSlot() {
+        assertTrue(mDispatcher.tick());
+
+        // Endpoint, model, target language, instruction or a forced retranslation: the identity moves
+        // on before the running call is abandoned (plan 4.1/6.3).
+        mDispatcher.invalidateContent();
+        mClock.advance(5_000);
+
+        // The call of the old configuration answers anyway.
+        mService.succeed(0, "\u4f60\u597d");
+
+        assertEquals("a late answer of the old content must not be cached", 0, mCache.size());
+        assertFalse("the slot is free again once the abandoned call reported", mDispatcher.isBusy());
+
+        assertTrue("the new generation can start", mDispatcher.tick());
+        assertEquals(2, mService.startCount());
+    }
+
+    @Test
+    public void theConnectionTestAndThePrefetchShareOneSlotInBothOrders() {
+        // Order 1: a translation started first refuses the out-of-band call.
+        assertTrue(mDispatcher.tick());
+
+        assertFalse("a running translation must refuse the test",
+                mDispatcher.tryAcquireExternalSlot());
+
+        mService.succeed(0, "a");
+        mClock.advance(2_000);
+
+        // Order 2: the test reserved the slot first; the prefetch must not start while it is held.
+        assertTrue(mDispatcher.tryAcquireExternalSlot());
+        assertTrue(mDispatcher.isBusy());
+        assertFalse("no translation may start while the test holds the slot", mDispatcher.tick());
+        assertEquals(1, mService.startCount());
+
+        // The test reached its terminal callback: the slot is free and the prefetch recovers.
+        mDispatcher.releaseExternalSlot();
+
+        assertFalse(mDispatcher.isBusy());
+        assertTrue("the prefetch recovers after the test", mDispatcher.tick());
+        assertEquals(2, mService.startCount());
+    }
+
+    @Test
+    public void aLateExternalReleaseCannotDisturbANewInFlightBatch() {
+        assertTrue(mDispatcher.tryAcquireExternalSlot());
+        mDispatcher.releaseExternalSlot();
+
+        assertTrue(mDispatcher.tick());
+
+        // The terminal callback of an earlier, already released attempt arrives late.
+        mDispatcher.releaseExternalSlot();
+
+        assertTrue("the running translation stays in flight", mDispatcher.isBusy());
+        assertEquals(1, mService.startCount());
+    }
+
+    @Test
     public void cancelledCallBlocksTheSlotUntilItReportsBack() {
         mDispatcher.tick();
 
@@ -309,5 +367,22 @@ public class SubtitleTranslationDispatcherTest {
 
         assertEquals(0, listener.results);
         assertNotNull(mService.batches.get(0));
+    }
+
+    @Test
+    public void aCancelledBatchGivesItsItemsBackToThePlanner() {
+        mDispatcher.tick();
+        SubtitleBatch abandoned = mService.batches.get(0);
+
+        mDispatcher.cancel();
+        mService.succeed(0, "late translation"); // the cancelled call reports after the position moved on
+
+        assertFalse("the abandoned result is never cached", mCache.hasSuccess(abandoned.getItemIds().get(0)));
+        assertFalse("the items are no longer held as pending", mPlanner.isPending(abandoned.getItemIds().get(0)));
+
+        mClock.advance(2_000);
+        assertTrue("a later generation can request the abandoned items again", mDispatcher.tick());
+        assertTrue("the same items are resubmitted for the new generation",
+                mService.batches.get(1).getItemIds().contains(abandoned.getItemIds().get(0)));
     }
 }

@@ -32,7 +32,9 @@ public class SubtitleConnectionTest {
         /** The request never completed (offline, timeout, DNS, refused connection). */
         NETWORK,
         /** 200 but the answer did not follow the agreed protocol. */
-        PROTOCOL
+        PROTOCOL,
+        /** Not sent: the single AI slot was occupied by a session request (plan 4.1). */
+        BUSY
     }
 
     /** Called exactly once, possibly on the transport's own thread. */

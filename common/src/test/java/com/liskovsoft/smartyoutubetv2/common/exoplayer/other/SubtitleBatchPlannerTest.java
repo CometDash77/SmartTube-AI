@@ -158,6 +158,61 @@ public class SubtitleBatchPlannerTest {
         assertTrue(batch.getContextAfter().size() <= SubtitleBatchPlanner.CONTEXT_AFTER);
     }
 
+    /** A timeline whose item start times are known, so neighbour spans are readable. */
+    private static SubtitleTimeline spokenTimeline(String... texts) {
+        List<SubtitleEvent> events = new ArrayList<>();
+
+        for (int i = 0; i < texts.length; i++) {
+            events.add(event(i * 5_000_000L, texts[i]));
+        }
+
+        return new SubtitleTimelineBuilder().build(events, texts.length * 5_000_000L);
+    }
+
+    @Test
+    public void neighboursComeFromTheWholeTimelineInTimeOrder() {
+        SubtitleBatchPlanner planner = new SubtitleBatchPlanner();
+        SubtitleTimeline timeline = spokenTimeline("t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
+                "t8", "t9", "t10", "t11", "t12");
+
+        // The position is 30 s, so the preceding items (t3..t5) are outside the prefetch window and
+        // only the whole timeline can supply them (plan 4.2).
+        SubtitleBatch batch = planner.nextBatch(timeline, 30_000_000L, true);
+
+        assertNotNull(batch);
+        assertEquals("t6", batch.getItems().get(0).getText());
+        assertEquals(java.util.Arrays.asList("t3", "t4", "t5"), batch.getContextBefore());
+        assertEquals(java.util.Arrays.asList("t10", "t11"), batch.getContextAfter());
+
+        for (String text : batch.getContextBefore()) {
+            assertFalse("a batch item must not repeat as context", batch.getItems().stream()
+                    .anyMatch(item -> item.getText().equals(text)));
+        }
+    }
+
+    @Test
+    public void oneStableItemAcrossConsecutiveFramesIsPlannedOnce() {
+        SubtitleBatchPlanner planner = new SubtitleBatchPlanner();
+        // Built directly: the item id of a cue that stays on screen is stable across frames, and the
+        // planner must request it once (plan 4.2).
+        SubtitleItem hello = new SubtitleItem("hello-id", "Hello");
+        List<SubtitleFrame> frames = new ArrayList<>();
+        frames.add(new SubtitleFrame(0, 1_000_000L, Collections.singletonList(hello)));
+        frames.add(new SubtitleFrame(1_000_000L, 2_000_000L, Collections.singletonList(hello)));
+        frames.add(new SubtitleFrame(2_000_000L, 3_000_000L, Collections.singletonList(hello)));
+        frames.add(new SubtitleFrame(3_000_000L, 4_000_000L,
+                Collections.singletonList(new SubtitleItem("world-id", "World"))));
+        SubtitleTimeline timeline = new SubtitleTimeline(frames, "fingerprint");
+
+        SubtitleBatch batch = planner.nextBatch(timeline, 0, false);
+
+        assertNotNull(batch);
+        assertEquals("the same stable id must not be requested twice", 2, batch.getItems().size());
+        assertEquals("Hello", batch.getItems().get(0).getText());
+        assertEquals("World", batch.getItems().get(1).getText());
+        assertEquals("the item keeps the frame start where it appeared", 0, batch.getItemStartUs(0));
+    }
+
     @Test
     public void resetClearsPendingState() {
         SubtitleBatchPlanner planner = new SubtitleBatchPlanner();

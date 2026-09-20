@@ -33,17 +33,23 @@ public class AiSubtitleController {
         private final int mSourceGeneration;
         private final int mTrackGeneration;
         private final int mSeekGeneration;
+        /** Content generation of the translations (plan 4.1): a configuration or a forced
+         *  retranslation moves it on, so cache, history and notifications can reject old results. */
+        private final int mTranslationGeneration;
 
-        private Token(int playerGeneration, int sourceGeneration, int trackGeneration, int seekGeneration) {
+        private Token(int playerGeneration, int sourceGeneration, int trackGeneration, int seekGeneration,
+                      int translationGeneration) {
             mPlayerGeneration = playerGeneration;
             mSourceGeneration = sourceGeneration;
             mTrackGeneration = trackGeneration;
             mSeekGeneration = seekGeneration;
+            mTranslationGeneration = translationGeneration;
         }
 
         @Override
         public String toString() {
-            return "Token{p" + mPlayerGeneration + "s" + mSourceGeneration + "t" + mTrackGeneration + "k" + mSeekGeneration + "}";
+            return "Token{p" + mPlayerGeneration + "s" + mSourceGeneration + "t" + mTrackGeneration
+                    + "k" + mSeekGeneration + "g" + mTranslationGeneration + "}";
         }
     }
 
@@ -63,6 +69,7 @@ public class AiSubtitleController {
     private int mSourceGeneration;
     private int mTrackGeneration;
     private int mSeekGeneration;
+    private int mTranslationGeneration;
     private String mActiveSourceKey; // memory-only identity of the selected source
     private boolean mAiEnabled;
     private int mDisplayMode = SubtitleComposer.MODE_ORIGINAL_ONLY;
@@ -134,8 +141,27 @@ public class AiSubtitleController {
      * track or tick event starts a fresh session without the user touching the menu again.
      */
     public void onConfigurationChanged() {
+        // Identity first (plan 4.1): the content generation moves on before anything is cancelled,
+        // so a result captured under the old configuration can never pass again.
+        mTranslationGeneration++;
         invalidateSession();
         mDisplay.clearTranslations();
+    }
+
+    /**
+     * Force retranslation of the current source (Kiss feature, plan 4.4): every stored translation
+     * of the running session is stale from now on. The selected source and its timeline stay bound;
+     * in-flight work is cancelled after the identity moved on.
+     */
+    public void onTranslationGenerationBumped() {
+        mTranslationGeneration++;
+        cancelInFlight();
+        mDisplay.clearTranslations();
+    }
+
+    /** Content generation of the translations; part of every token and of the diagnostics. */
+    public int getTranslationGeneration() {
+        return mTranslationGeneration;
     }
 
     /** The player reported actual subtitles-off (short CC press). */
@@ -199,7 +225,8 @@ public class AiSubtitleController {
 
     /** Token a request must carry; results of another token are discarded. */
     public Token currentToken() {
-        return new Token(mPlayerGeneration, mSourceGeneration, mTrackGeneration, mSeekGeneration);
+        return new Token(mPlayerGeneration, mSourceGeneration, mTrackGeneration, mSeekGeneration,
+                mTranslationGeneration);
     }
 
     public boolean isCurrent(Token token) {
@@ -207,7 +234,8 @@ public class AiSubtitleController {
                 && token.mPlayerGeneration == mPlayerGeneration
                 && token.mSourceGeneration == mSourceGeneration
                 && token.mTrackGeneration == mTrackGeneration
-                && token.mSeekGeneration == mSeekGeneration;
+                && token.mSeekGeneration == mSeekGeneration
+                && token.mTranslationGeneration == mTranslationGeneration;
     }
 
     /**

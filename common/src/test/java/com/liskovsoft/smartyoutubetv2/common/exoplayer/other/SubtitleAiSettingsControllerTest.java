@@ -177,4 +177,75 @@ public class SubtitleAiSettingsControllerTest {
         assertEquals("https://api.deepseek.com/v1/chat/completions", request.getUrl());
         assertEquals("deepseek-v4-pro", new org.json.JSONObject(request.getBody()).getString("model"));
     }
+
+    @Test
+    public void aContextTierChangeRebuildsTheSessionExactlyOnce() {
+        int before = mConfigChanges;
+
+        assertTrue(mController.setContextTier(SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED));
+
+        assertEquals(before + 1, mConfigChanges);
+        assertEquals(SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED, mController.getSettings().getContextTier());
+        assertEquals("the tier is part of the stored settings", SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED,
+                storedSettings().getContextTier());
+
+        assertFalse("re-selecting the same tier is quiet",
+                mController.setContextTier(SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED));
+        assertEquals(before + 1, mConfigChanges);
+    }
+
+    @Test
+    public void aSegmentationSwitchRebuildsTheSessionExactlyOnce() {
+        int before = mConfigChanges;
+
+        assertTrue(mController.setRuleSegmentation(true));
+
+        assertEquals(before + 1, mConfigChanges);
+        assertTrue(mController.getSettings().usesRuleSegmentation());
+        assertEquals(SubtitleAiSettings.SEGMENTATION_RULE_VERSION,
+                mController.getSettings().getConfig().getSegmentationRuleVersion());
+
+        assertFalse(mController.setRuleSegmentation(true));
+        assertEquals(before + 1, mConfigChanges);
+    }
+
+    @Test
+    public void theNotificationSwitchNeverInvalidatesTheSession() {
+        int before = mConfigChanges;
+
+        mController.setLoadNotifications(false);
+
+        assertFalse(mController.getSettings().showsLoadNotifications());
+        assertEquals("display-only: no session rebuild, no request", before, mConfigChanges);
+        assertFalse(storedSettings().showsLoadNotifications());
+    }
+
+    /** Reads the settings back through a real store over the same backend map. */
+    private SubtitleAiSettings storedSettings() {
+        return new SubtitleAiPrefsStore(new SubtitleAiPrefsStore.Backend() {
+            @Override
+            public String get(String key) {
+                return mStore.get(key);
+            }
+
+            @Override
+            public void put(String key, String value) {
+                mStore.put(key, value);
+            }
+        }).load();
+    }
+
+    @Test
+    public void aLanguageChangeKeepsTheKissFeatureSettings() {
+        mController.setContextTier(SubtitleAiSettings.CONTEXT_COHERENT);
+        mController.setRuleSegmentation(true);
+        int changesAfterKiss = mConfigChanges;
+
+        mController.setTargetLanguage("zh-TW");
+
+        assertEquals(changesAfterKiss + 1, mConfigChanges);
+        assertEquals(SubtitleAiSettings.CONTEXT_COHERENT, mController.getSettings().getContextTier());
+        assertTrue(mController.getSettings().usesRuleSegmentation());
+        assertTrue(mController.getSettings().showsLoadNotifications());
+    }
 }

@@ -311,4 +311,32 @@ public class AiSubtitleControllerTest {
         assertEquals(Collections.emptyList(), mDisplay.lastTranslations);
         assertNotNull(mController.currentToken());
     }
+
+    @Test
+    public void configurationChangeMovesTheTranslationGenerationAndRefusesOldResults() {
+        mController.onSubtitleSourceSelected(source(ORIGIN_URL));
+        AiSubtitleController.Token before = mController.currentToken();
+        int generationBefore = mController.getTranslationGeneration();
+
+        mController.onConfigurationChanged();
+
+        assertEquals(generationBefore + 1, mController.getTranslationGeneration());
+        assertFalse("content of the old generation is refused",
+                mController.applyTranslations(before, Arrays.asList("\u4f60\u597d")));
+        assertTrue(mController.applyTranslations(mController.currentToken(), Arrays.asList("\u4e16\u754c")));
+    }
+
+    @Test
+    public void bumpingTheTranslationGenerationKeepsTheSourceAndDropsOldResults() {
+        mController.onSubtitleSourceSelected(source(ORIGIN_URL));
+        mController.applyTranslations(mController.currentToken(), Arrays.asList("\u4f60\u597d"));
+        AiSubtitleController.Token stale = mController.currentToken();
+
+        mController.onTranslationGenerationBumped();
+
+        assertEquals(Collections.emptyList(), mDisplay.lastTranslations);
+        assertFalse(mController.applyTranslations(stale, Arrays.asList("\u4f60\u597d")));
+        assertTrue("the source session stays bound", mController.hasActiveSession());
+        assertTrue(mController.applyTranslations(mController.currentToken(), Arrays.asList("\u4e16\u754c")));
+    }
 }

@@ -110,6 +110,43 @@ public class SubtitleSeekCancellationTest {
     }
 
     @Test
+    public void aLateAnswerAfterAContentConfigurationChangeIsDropped() {
+        RecordingDisplay display = new RecordingDisplay();
+        SelectedSubtitleSource source = new SelectedSubtitleSource(1, "https://example.com/subs",
+                "en", "en", "English", "text/vtt", null, null, true);
+        AiSubtitleSessionBinder binder = new AiSubtitleSessionBinder(display, () -> source);
+        SubtitleTranslationCache cache = new SubtitleTranslationCache();
+        FakeService service = new FakeService();
+        SubtitleTranslationDispatcher dispatcher = new SubtitleTranslationDispatcher(
+                new SubtitleBatchPlanner(), cache, service, new FixedClock(), null);
+
+        SubtitleTimeline timeline = new SubtitleTimelineBuilder().build(
+                Collections.singletonList(new SubtitleEvent(0,
+                        Collections.singletonList(new com.google.android.exoplayer2.text.Cue("Hello")))), 2_000_000L);
+
+        binder.setTranslationCache(cache);
+        binder.installDispatcher(dispatcher);
+        binder.setTimeline(timeline);
+        binder.onVideoLoaded();
+        binder.onAiEnabled(true);
+
+        assertTrue("the tick starts the batch", binder.onTick(0));
+        cache.put("previous", "\u65e7");
+
+        // The user changes the target language (or another content setting): one transaction moves
+        // the identity on, cancels the in-flight call and drops the old configuration's cache.
+        binder.onConfigurationChanged();
+
+        assertEquals("the old configuration's cache is dropped", 0, cache.size());
+
+        // The old configuration's answer arrives anyway.
+        service.succeed("\u4f60\u597d");
+
+        assertEquals("a late answer of the old content must not be cached", 0, cache.size());
+        assertEquals("nor repaint the frame", Collections.emptyList(), display.translations);
+    }
+
+    @Test
     public void aLateAnswerAfterSeekIsDroppedAndNothingIsRepainted() {
         RecordingDisplay display = new RecordingDisplay();
         SelectedSubtitleSource source = new SelectedSubtitleSource(1, "https://example.com/subs",

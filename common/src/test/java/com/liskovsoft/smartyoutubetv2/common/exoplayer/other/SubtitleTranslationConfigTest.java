@@ -62,4 +62,19 @@ public class SubtitleTranslationConfigTest {
         assertTrue(namespace.matches("[0-9a-f]+"));
         assertTrue(config.toString().contains(namespace));
     }
+
+    @Test
+    public void contextTierAndSegmentationVersionChangeTheNamespace() {
+        SubtitleTranslationConfig base = new SubtitleTranslationConfig(
+                "https://api.deepseek.com", "deepseek-flash", "zh-Hans", "style", 0, 0);
+
+        assertNotEquals(base.namespace(), new SubtitleTranslationConfig(
+                "https://api.deepseek.com", "deepseek-flash", "zh-Hans", "style", 1, 0).namespace());
+        assertNotEquals(base.namespace(), new SubtitleTranslationConfig(
+                "https://api.deepseek.com", "deepseek-flash", "zh-Hans", "style", 0, 1).namespace());
+        assertEquals(base.namespace(), new SubtitleTranslationConfig(
+                "https://api.deepseek.com", "deepseek-flash", "zh-Hans", "style", 0, 0).namespace());
+        assertEquals("basic tier and no rule version stay the legacy identity", base.namespace(),
+                config("https://api.deepseek.com", "deepseek-flash", "zh-Hans", "style").namespace());
+    }
 }

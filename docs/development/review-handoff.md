@@ -1,6 +1,6 @@
 # Reliable review and handoff
 
-> Current subtitle status: [current status](../plans/subtitle-current-status.md). The user accepted the nightly-24 workflow; next software work concerns accuracy using new device evidence. The [production rework plan](../plans/subtitle-production-rework-plan.md) is historical, not the automatic next queue. Jev tooling scope and compaction prerequisites: [retrospective](../research/jev-compaction-retrospective.md).
+> Current subtitle status: [current status](../plans/subtitle-current-status.md). The user accepted nightly-24; the [Kiss feature plan](../plans/kiss-subtitle-features-implementation-plan.md) is in progress — K0–K3 and K6 are implemented and locally verified, K4/K5 (rule segmentation) are not, and no CI candidate exists for this round. See [Kiss implementation status](../plans/evidence/kiss-implementation-status-2026-09-20.md). The [production rework plan](../plans/subtitle-production-rework-plan.md) is historical, not the automatic next queue. Jev tooling scope and compaction prerequisites: [retrospective](../research/jev-compaction-retrospective.md).
 
 ## Navigation and execution
 

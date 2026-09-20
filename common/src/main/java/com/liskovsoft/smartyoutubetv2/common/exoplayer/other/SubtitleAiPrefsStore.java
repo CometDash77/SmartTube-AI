@@ -6,10 +6,15 @@ import org.json.JSONObject;
 /**
  * Persistence of the non-sensitive AI subtitle settings (plan sections 6.1 and 8).
  *
- * <p>Only the endpoint, model, target language, display mode, expression instruction and the AI
- * switch are stored, as one JSON object through an injected backend, so this class stays free of
- * prefs details and can be tested without a device. The API key is not part of it: it belongs to
- * {@link SubtitleKeyStore}, which has its own storage and exclusion rules.
+ * <p>Only the endpoint, model, target language, display mode, expression instruction, the AI switch,
+ * the smart-context tier, the segmentation switch and the notification switch are stored, as one
+ * JSON object through an injected backend, so this class stays free of prefs details and can be
+ * tested without a device. The API key is not part of it: it belongs to {@link SubtitleKeyStore},
+ * which has its own storage and exclusion rules.
+ *
+ * <p>The settings written by earlier releases may lack the keys added for the Kiss features; those
+ * fall back to their defaults on load, so no migration step is needed and an unreadable value never
+ * breaks playback.
  */
 public class SubtitleAiPrefsStore {
     public static final String STORAGE_KEY = "ai_subtitle_settings_v1";
@@ -27,6 +32,9 @@ public class SubtitleAiPrefsStore {
     private static final String KEY_INSTRUCTION = "instruction";
     private static final String KEY_ENDPOINT = "endpoint";
     private static final String KEY_MODEL = "model";
+    private static final String KEY_CONTEXT_TIER = "contextTier";
+    private static final String KEY_RULE_SEGMENTATION = "ruleSegmentation";
+    private static final String KEY_LOAD_NOTIFICATIONS = "loadNotifications";
 
     private final Backend mBackend;
 
@@ -50,6 +58,9 @@ public class SubtitleAiPrefsStore {
             json.put(KEY_INSTRUCTION, settings.getInstruction());
             json.put(KEY_ENDPOINT, settings.getConfig().getEndpointBaseUrl());
             json.put(KEY_MODEL, settings.getConfig().getModel());
+            json.put(KEY_CONTEXT_TIER, settings.getContextTier());
+            json.put(KEY_RULE_SEGMENTATION, settings.usesRuleSegmentation());
+            json.put(KEY_LOAD_NOTIFICATIONS, settings.showsLoadNotifications());
 
             mBackend.put(STORAGE_KEY, json.toString());
         } catch (JSONException e) {
@@ -76,7 +87,10 @@ public class SubtitleAiPrefsStore {
 
             return SubtitleAiSettings.create(false, json.optInt(KEY_MODE, 0),
                     json.optString(KEY_TARGET, null), json.optString(KEY_INSTRUCTION, null),
-                    json.optString(KEY_ENDPOINT, null), json.optString(KEY_MODEL, null));
+                    json.optString(KEY_ENDPOINT, null), json.optString(KEY_MODEL, null),
+                    json.optInt(KEY_CONTEXT_TIER, SubtitleAiSettings.CONTEXT_BASIC),
+                    json.optBoolean(KEY_RULE_SEGMENTATION, false),
+                    json.optBoolean(KEY_LOAD_NOTIFICATIONS, true));
         } catch (JSONException e) {
             return SubtitleAiSettings.defaults(); // a damaged value must not break playback
         }

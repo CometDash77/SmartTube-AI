@@ -26,16 +26,31 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         boolean tick(long positionUs);
     }
 
+    /**
+     * Notified after a repaint really put at least one accepted translation on the current frame.
+     *
+     * <p>This is the only event the load-notification policy may use for "the current segment is
+     * translated": a batch of only future items reports nothing here, and the frame speaks for itself
+     * when the player later reaches it from the cache (plan 4.5).
+     */
+    public interface TranslationDisplayListener {
+        void onTranslationDisplayed();
+    }
+
     private final AiSubtitleController mController;
     private final SubtitleDisplay mDisplay;
     private final SubtitleSourceProvider mSourceProvider;
     private TickTarget mTickTarget;
     private SubtitleTranslationDispatcher mDispatcher;
     private SubtitleTranslationCache mTranslationCache;
+    private SubtitleSessionContext mSessionContext;
     private SubtitleTimeline mTimeline;
     /** Source key the installed timeline belongs to; a mismatch means "not exportable yet". */
     private String mTimelineSourceKey;
     private List<SubtitleItem> mFrameItems = Collections.emptyList();
+    /** Non-blank translations the last current-frame application actually put into slots. */
+    private int mLastAppliedTranslationCount;
+    private TranslationDisplayListener mTranslationDisplayListener;
 
     public AiSubtitleSessionBinder(SubtitleDisplay display, SubtitleSourceProvider sourceProvider) {
         mDisplay = display;
@@ -54,6 +69,11 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
     /** A new video opened (including re-opening the same one). */
     public void onVideoLoaded() {
         mController.openVideo();
+
+        if (mSessionContext != null) {
+            mSessionContext.reset(); // examples and summary belong to the previous video (plan 4.2)
+        }
+
         refreshSource();
     }
 
@@ -73,6 +93,12 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         mController.onSeek();
         cancelDispatcher(); // an in-flight batch belongs to the abandoned position
         mDisplay.resetOriginalCueState();
+
+        if (mSessionContext != null) {
+            // The frozen summary survives a seek; the examples before the new position must not leak
+            // into the text that follows it (plan 4.2).
+            mSessionContext.resetExamples();
+        }
     }
 
     /**
@@ -95,8 +121,69 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         mController.setAiEnabled(enabled);
     }
 
+    /**
+     * Endpoint, model, target language, instruction, context tier or segmentation rules changed: one
+     * content transaction. The session identity moves on first, then the in-flight batch is abandoned
+     * together with the translations of the old configuration, so neither a late answer nor a cached
+     * result of the previous setup can be displayed or reused (plan 4.1/6.3).
+     */
     public void onConfigurationChanged() {
         mController.onConfigurationChanged();
+
+        if (mDispatcher != null) {
+            mDispatcher.invalidateContent();
+        }
+
+        if (mTranslationCache != null) {
+            mTranslationCache.clear();
+        }
+
+        if (mSessionContext != null) {
+            mSessionContext.reset(); // the summary was produced for the old analysis configuration
+        }
+    }
+
+    /**
+     * Forces retranslation of the current source (Kiss feature, plan 4.4): one transaction on the
+     * current identity.
+     *
+     * <p>The content generation moves on first, so a late answer of the previous generation can
+     * neither repaint nor enter the cache; then the stored translations, the failure budget and the
+     * coherent examples of this source are dropped, while the original timeline and the frozen summary
+     * survive (they are independent of the translation results). Finally the planner is reset so the
+     * current window is requested again from the current position. The original subtitles stay on
+     * screen, because an emptied cache composes back to the original text.
+     *
+     * @return true when the transaction ran; false when AI is off, no source is bound or no timeline
+     *         was obtained yet
+     */
+    public boolean retranslateCurrentSource() {
+        if (!mController.isAiEnabled() || !mController.hasActiveSession() || mTimeline == null) {
+            return false;
+        }
+
+        // Identity first (plan 4.1), then abandon the in-flight batch, then drop its results.
+        mController.onTranslationGenerationBumped();
+
+        if (mDispatcher != null) {
+            mDispatcher.invalidateContent();
+        }
+
+        if (mTranslationCache != null) {
+            mTranslationCache.clear(); // every stored success and the whole failure budget
+        }
+
+        if (mSessionContext != null) {
+            mSessionContext.resetExamples(); // the frozen summary is kept, the examples are not
+        }
+
+        if (mDispatcher != null) {
+            mDispatcher.setTimeline(mTimeline); // planner reset: the window is planned again
+        }
+
+        applyCurrentFrame(); // with an empty cache this composes the original text again
+
+        return true;
     }
 
     /** Language code of the subtitle source currently selected, or null when none is bound. */
@@ -133,6 +220,10 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
     public void installDispatcher(SubtitleTranslationDispatcher dispatcher) {
         mDispatcher = dispatcher;
 
+        if (dispatcher != null && mSessionContext != null) {
+            dispatcher.setSessionContext(mSessionContext);
+        }
+
         if (dispatcher != null) {
             setTickTarget(positionUs -> {
                 dispatcher.setPosition(positionUs);
@@ -161,6 +252,23 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
     /** Installs the bounded session cache used for display hand-off. */
     public void setTranslationCache(SubtitleTranslationCache translationCache) {
         mTranslationCache = translationCache;
+    }
+
+    /**
+     * Installs the session context material of plan 4.2: verified examples are fed by the dispatcher,
+     * the frozen summary by the context analysis.
+     */
+    public void setSessionContext(SubtitleSessionContext sessionContext) {
+        mSessionContext = sessionContext;
+
+        if (mDispatcher != null) {
+            mDispatcher.setSessionContext(sessionContext);
+        }
+    }
+
+    /** Installs the listener that is told when a repaint really showed a translation (plan 4.5). */
+    public void setTranslationDisplayListener(TranslationDisplayListener listener) {
+        mTranslationDisplayListener = listener;
     }
 
     /**
@@ -264,8 +372,35 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
      * @return true when the display was updated
      */
     public boolean applyFrameTranslations(java.util.List<SubtitleItem> items, SubtitleFrameTranslations.TranslationLookup lookup) {
-        return mController.applyTranslations(mController.currentToken(),
-                SubtitleFrameTranslations.align(items, lookup));
+        List<String> aligned = SubtitleFrameTranslations.align(items, lookup);
+        int applied = 0;
+
+        for (String translation : aligned) {
+            if (translation != null && !translation.trim().isEmpty()) {
+                applied++;
+            }
+        }
+
+        mLastAppliedTranslationCount = applied;
+
+        boolean displayed = mController.applyTranslations(mController.currentToken(), aligned);
+
+        // The event belongs to the actual accept-and-display entry, not to the network callback: a
+        // batch of only future items (applied == 0) stays silent here and speaks when the player
+        // reaches that frame and this method really shows its cached translation (plan 4.5).
+        if (displayed && applied > 0 && mTranslationDisplayListener != null) {
+            mTranslationDisplayListener.onTranslationDisplayed();
+        }
+
+        return displayed;
+    }
+
+    /**
+     * Non-blank translations the last {@link #applyCurrentFrame()} / alignment actually put into
+     * the current frame's slots; a success batch of only future items reports zero (plan 4.5).
+     */
+    public int getLastAppliedTranslationCount() {
+        return mLastAppliedTranslationCount;
     }
 
     /** Abandons the in-flight translation attempt, if the dispatcher is installed. */
@@ -282,6 +417,10 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
 
         if (previousKey == null ? currentKey != null : !previousKey.equals(currentKey)) {
             cancelDispatcher(); // the selected source changed: a batch of the old one belongs to it
+
+            if (mSessionContext != null) {
+                mSessionContext.reset(); // another track has other text and another summary
+            }
         }
     }
 }

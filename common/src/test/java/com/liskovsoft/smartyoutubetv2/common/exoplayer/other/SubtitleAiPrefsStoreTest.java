@@ -99,4 +99,44 @@ public class SubtitleAiPrefsStoreTest {
 
         assertFalse(mStore.load().isEnabled());
     }
+
+    @Test
+    public void storedSettingsWithoutTheKissKeysFallBackToTheirDefaults() {
+        // A value written by an earlier release: no contextTier, ruleSegmentation or loadNotifications.
+        mMap.put(SubtitleAiPrefsStore.STORAGE_KEY, "{\"enabled\":false,\"mode\":2,\"target\":\"zh-Hans\","
+                + "\"instruction\":\"Be concise.\",\"endpoint\":\"https://api.deepseek.com\",\"model\":\"deepseek-flash\"}");
+
+        SubtitleAiSettings loaded = mStore.load();
+
+        assertEquals("the old settings keep their meaning", SubtitleComposer.MODE_BILINGUAL, loaded.getDisplayMode());
+        assertEquals(SubtitleLanguageSupport.ZH_HANS, loaded.getTargetLanguage());
+        assertEquals("missing tier falls back to basic", SubtitleAiSettings.CONTEXT_BASIC, loaded.getContextTier());
+        assertFalse("missing segmentation falls back to off", loaded.usesRuleSegmentation());
+        assertTrue("missing notification switch falls back to on", loaded.showsLoadNotifications());
+    }
+
+    @Test
+    public void kissFeatureSettingsRoundTrip() {
+        mStore.save(SubtitleAiSettings.create(true, SubtitleComposer.MODE_TRANSLATION_ONLY, "en", null, null, null,
+                SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED, true, false));
+
+        SubtitleAiSettings loaded = mStore.load();
+
+        assertEquals(SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED, loaded.getContextTier());
+        assertTrue(loaded.usesRuleSegmentation());
+        assertFalse(loaded.showsLoadNotifications());
+        assertEquals(SubtitleAiSettings.SEGMENTATION_RULE_VERSION, loaded.getConfig().getSegmentationRuleVersion());
+    }
+
+    @Test
+    public void anInvalidStoredContextTierFallsBackToBasic() {
+        mStore.save(SubtitleAiSettings.create(false, 0, "en", null, null, null,
+                SubtitleAiSettings.CONTEXT_COHERENT, false, true));
+
+        String stored = mMap.get(SubtitleAiPrefsStore.STORAGE_KEY);
+        assertTrue(stored.contains("\"contextTier\":1"));
+        mMap.put(SubtitleAiPrefsStore.STORAGE_KEY, stored.replace("\"contextTier\":1", "\"contextTier\":9"));
+
+        assertEquals(SubtitleAiSettings.CONTEXT_BASIC, mStore.load().getContextTier());
+    }
 }

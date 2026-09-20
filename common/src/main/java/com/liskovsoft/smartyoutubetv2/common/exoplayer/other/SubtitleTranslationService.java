@@ -75,6 +75,14 @@ public class SubtitleTranslationService implements SubtitleTranslationDispatcher
         mUserStyle = userStyle;
     }
 
+    /** The context tier of the configuration in use; it decides what the request may carry. */
+    @Override
+    public int getContextTier() {
+        SubtitleTranslationConfig config = mConfigProvider != null ? mConfigProvider.getConfig() : null;
+
+        return config != null ? config.getContextTier() : SubtitleAiSettings.CONTEXT_BASIC;
+    }
+
     @Override
     public SubtitleTranslationDispatcher.TranslationCall translate(SubtitleBatch batch,
                                                                   SubtitleTranslationDispatcher.Callback callback) {

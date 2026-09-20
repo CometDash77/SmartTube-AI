@@ -13,6 +13,14 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitlePrefetchLoo
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotFetcher;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSourceBinder;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleLoadNoticeDelivery;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSessionContext;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiSettings;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleFrame;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleItem;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSummaryAnalyzer;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSummarySession;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleLoadNotificationPolicy;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTimelineCoordinator;
 
 import java.util.concurrent.ExecutorService;
@@ -63,9 +71,12 @@ import com.liskovsoft.smartyoutubetv2.common.utils.Utils.Processor;
 import com.liskovsoft.googlecommon.common.helpers.ServiceHelper;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class PlaybackPresenter extends BasePresenter<PlaybackView> implements PlayerEventListener {
@@ -87,6 +98,12 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private AiSubtitleSessionBinder mAiSubtitleBinder;
     private SubtitleAiSettingsController mAiSettings;
     private SubtitleTranslationCache mAiTranslationCache;
+    /** Verified examples and the frozen summary of the running session (plan 4.2). */
+    private SubtitleSessionContext mAiSessionContext;
+    /** One automatic context analysis per source and analysis configuration (plan 4.2). */
+    private final SubtitleSummarySession mAiSummarySession = new SubtitleSummarySession();
+    private SubtitleSummaryAnalyzer mAiSummaryAnalyzer;
+    private SubtitleTranslationClient.Cancellable mAiSummaryCall;
     private SubtitleTranslationDispatcher mAiDispatcher;
     private SubtitleTranslationService mAiTranslationService;
     /** True after 401/403/402: no further request is started until the credential changes (N2). */
@@ -111,6 +128,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     }
     /** Bounded recent session events for the diagnostic export: enumerated codes only, never content. */
     private final SubtitleExportEventLog mAiEvents = new SubtitleExportEventLog(android.os.SystemClock::elapsedRealtime);
+    /** Decides which subtitle load state may be shown as a short non-modal notice (plan 4.5). */
+    private final SubtitleLoadNotificationPolicy mAiLoadNotifications = new SubtitleLoadNotificationPolicy();
     /** Outcome of the last snapshot attempt; the diagnostic report prints it instead of guessing. */
     private volatile String mAiSnapshotStatus = "NOT_REQUESTED";
     /** Fixed outcome of the last {@code requestAiSubtitleTimeline()} call; never a free-form value. */
@@ -128,6 +147,33 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private SubtitleExportController mAiExport;
     private ExecutorService mAiExportExecutor;
     private final android.os.Handler mMainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    /**
+     * Queues the accepted load notices and re-checks the live session at delivery time (plan 4.5): a
+     * notice queued before the switch closed, the content generation moved on or the surface was
+     * released must not appear afterwards.
+     */
+    private final SubtitleLoadNoticeDelivery mAiNoticeDelivery = new SubtitleLoadNoticeDelivery(
+            task -> mMainHandler.post(task), new SubtitleLoadNoticeDelivery.SessionState() {
+                @Override
+                public String getSourceKey() {
+                    return mAiSubtitleBinder != null ? mAiSubtitleBinder.getController().getActiveSourceKey() : null;
+                }
+
+                @Override
+                public int getTranslationGeneration() {
+                    return mAiSubtitleBinder != null ? mAiSubtitleBinder.getController().getTranslationGeneration() : 0;
+                }
+
+                @Override
+                public boolean isAiEnabled() {
+                    return mAiSettings != null && mAiSettings.getSettings().isEnabled();
+                }
+
+                @Override
+                public boolean showsNotifications() {
+                    return mAiSettings != null && mAiSettings.getSettings().showsLoadNotifications();
+                }
+            });
 
     private PlaybackPresenter(Context context) {
         super(context);
@@ -383,6 +429,9 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         mAiSubtitlesVisible = null; // visibility is unknown again until the tracks settle
         mAiEvents.add("SOURCE_CHANGED");
 
+        cancelAiSubtitleSummary(); // the analysis sampled the previous source
+        mAiSummarySession.reset();
+
         if (subtitles != null) {
             subtitles.onSourceChanged(); // invalidate the previous identity before anyone reacts
         }
@@ -407,31 +456,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         mAiSettings = new SubtitleAiSettingsController(
                 new SubtitleAiPrefsStore(new AppPrefsSubtitleAiBackend(getContext())),
                 SubtitleKeyStores.create(getContext()),
-                () -> {
-                    // Endpoint, model, target language or instruction changed: the old session and the
-                    // translations cached for it must not be reused (plan 6.3).
-                    if (mAiSubtitleBinder != null) {
-                        mAiSubtitleBinder.getController().onConfigurationChanged();
-                    }
-
-                    if (mAiTranslationCache != null) {
-                        mAiTranslationCache.clear();
-                    }
-
-                    mAiStats.reset();
-                    mAiLastTranslationResult = "NOT_REQUESTED";
-                    mAiAuthorizationStopped = false;
-                    cancelAiSubtitleConnectionTest();
-                    mAiEvents.add("CONFIGURATION_CHANGED");
-
-                    // The original timeline is independent of endpoint, model and language, so it must
-                    // not be fetched again; re-installing it restarts prefetch for the new
-                    // configuration instead of waiting for an unrelated track event (plan 6.3).
-                    reinstateAiSubtitleTimeline();
-                    if (mAiLoop != null && mAiSettings.getSettings().isEnabled() && mAiSettings.isKeyConfigured()) {
-                        mAiLoop.start();
-                    }
-                });
+                this::onAiContentConfigurationChanged);
         mAiTranslationCache = new SubtitleTranslationCache();
         // Dispatcher/cache/display are player state: deliver network callbacks on the main thread.
         com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationClient client =
@@ -475,10 +500,16 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                         mAiStats.onBatchDelivered(delivered);
 
                         if (mAiSubtitleBinder != null) {
+                            // A batch of only future items must not claim a visible success: the
+                            // display listener reports the notice only when a translation really
+                            // reached the current frame, including a cached frame reached later.
                             mAiSubtitleBinder.applyCurrentFrame();
                         }
                     } else {
                         mAiStats.onBatchFailed();
+
+                        syncAiLoadNotificationIdentity();
+                        mAiNoticeDelivery.show(mAiLoadNotifications.onTranslationFailed());
 
                         // A refused credential or an empty balance must not be retried blindly: stop
                         // the loop and let the menu ask for a new key (plan 6.3, task N2).
@@ -494,8 +525,14 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                 });
         mAiSettings.setCredentialChangeListener(this::onAiCredentialChanged);
 
+        mAiSessionContext = new SubtitleSessionContext();
         mAiSubtitleBinder.setTranslationCache(mAiTranslationCache);
+        mAiSubtitleBinder.setSessionContext(mAiSessionContext);
         mAiSubtitleBinder.installDispatcher(mAiDispatcher);
+        mAiSubtitleBinder.setTranslationDisplayListener(() -> {
+            syncAiLoadNotificationIdentity();
+            mAiNoticeDelivery.show(mAiLoadNotifications.onTranslationShown());
+        });
         // The clock is built here but started only by the AI switch (applyAiEnabled), so ordinary
         // playback never checks or requests anything on its own.
         mAiLoop = mAiSubtitleBinder.createLoop(new SubtitleHandlerScheduler(), () -> {
@@ -503,6 +540,170 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
             return player != null ? player.getPositionMs() : 0;
         });
+    }
+
+    /**
+     * One content transaction for endpoint, model, target language, instruction, context tier and
+     * segmentation rules (plan 4.1/6.3). The session identity moves on first and the in-flight batch
+     * is abandoned together with the translations of the old configuration, so neither a late answer
+     * nor a cached result of the previous setup can be displayed or reused; the presenter
+     * bookkeeping follows.
+     */
+    private void onAiContentConfigurationChanged() {
+        if (mAiSubtitleBinder != null) {
+            mAiSubtitleBinder.onConfigurationChanged(); // identity + cancel + cache of the old setup
+        } else if (mAiTranslationCache != null) {
+            mAiTranslationCache.clear();
+        }
+
+        mAiStats.reset();
+        mAiLastTranslationResult = "NOT_REQUESTED";
+        mAiAuthorizationStopped = false;
+        cancelAiSubtitleConnectionTest();
+        mAiEvents.add("CONFIGURATION_CHANGED");
+
+        // The original timeline is independent of endpoint, model and language, so it must not be
+        // fetched again; re-installing it restarts prefetch for the new configuration instead of
+        // waiting for an unrelated track event (plan 6.3).
+        reinstateAiSubtitleTimeline();
+
+        // The previous analysis belongs to the old configuration; the enhanced tier analyses once more.
+        cancelAiSubtitleSummary();
+        mAiSummarySession.reset();
+        maybeAnalyzeAiSubtitleContext();
+
+        if (mAiLoop != null && mAiSettings != null && mAiSettings.getSettings().isEnabled()
+                && mAiSettings.isKeyConfigured()) {
+            mAiLoop.start();
+        }
+    }
+
+    /**
+     * Starts the one automatic context analysis of the {@code VIDEO_ENHANCED} tier (plan 4.2), reusing
+     * the configured endpoint, model, key and transport. The attempt holds the single AI slot, so the
+     * first translation batch waits for it (at most 5 s) instead of the analysis queueing behind
+     * translations; a failure or too small a sample simply leaves the session on the coherent context.
+     */
+    private void maybeAnalyzeAiSubtitleContext() {
+        if (mAiSettings == null || mAiSessionContext == null || mAiSubtitleBinder == null) {
+            return;
+        }
+
+        SubtitleAiSettings settings = mAiSettings.getSettings();
+
+        if (!settings.isEnabled() || settings.getContextTier() != SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED
+                || mAiSessionContext.hasSummary()) {
+            return;
+        }
+
+        SubtitleTimeline timeline = mAiSubtitleBinder.getTimelineOfCurrentSource();
+        String sourceKey = mAiSubtitleBinder.getController().getActiveSourceKey();
+
+        if (timeline == null || timeline.isEmpty() || sourceKey == null) {
+            return; // the sample comes from the selected source's own timeline
+        }
+
+        if (!mAiSummarySession.beginAttempt(sourceKey + "|" + settings.getConfig().namespace())) {
+            return; // one automatic attempt per source and analysis configuration (plan 4.2)
+        }
+
+        if (mAiDispatcher == null || !mAiDispatcher.tryAcquireExternalSlot()) {
+            mAiSummarySession.releaseAttempt(); // busy: never spend the one attempt on a refusal
+            return;
+        }
+
+        final SubtitleTranslationDispatcher dispatcher = mAiDispatcher;
+        mAiEvents.add("CONTEXT_ANALYSIS_STARTED");
+
+        mAiSummaryCall = aiSummaryAnalyzer().analyze(settings.getConfig(),
+                mAiSettings.asKeyProvider().getApiKey(), mAiSubtitleBinder.getActiveSourceLanguage(),
+                videoTitle(), videoDescription(), sampleOriginalLines(timeline), (status, summary) ->
+                        mMainHandler.post(() -> {
+                            if (dispatcher != null) {
+                                dispatcher.releaseExternalSlot(); // the first batch may start now
+                            }
+
+                            mAiSummarySession.finishAttempt();
+                            mAiEvents.add("CONTEXT_" + status.name());
+
+                            if (status == SubtitleSummaryAnalyzer.Status.SUCCESS && summary != null
+                                    && mAiSessionContext != null) {
+                                mAiSessionContext.freezeSummary(summary);
+                            } else if (status != SubtitleSummaryAnalyzer.Status.CANCELLED) {
+                                // A failure falls back to the coherent context and is never retried
+                                // automatically (plan 4.2).
+                                mAiEvents.add("CONTEXT_ANALYSIS_FALLBACK");
+                            } else {
+                                // The abandoned attempt released the shared slot only now, so a
+                                // configuration change that cancelled it can still analyse the new
+                                // one; the attempt key keeps this from looping (plan 4.2).
+                                maybeAnalyzeAiSubtitleContext();
+                            }
+                        }));
+    }
+
+    /** Abandons a prepared context analysis (video, source, configuration change, release). */
+    private void cancelAiSubtitleSummary() {
+        if (mAiSummaryCall != null) {
+            mAiSummaryCall.cancel();
+            mAiSummaryCall = null;
+        }
+    }
+
+    /** The analysis transport: the same clean client and the plan's independent 5 s budget. */
+    private SubtitleSummaryAnalyzer aiSummaryAnalyzer() {
+        if (mAiSummaryAnalyzer == null) {
+            mAiSummaryAnalyzer = new SubtitleSummaryAnalyzer(new SubtitleOkHttpTranslationClient(),
+                    (delayMs, task) -> {
+                        SubtitleHandlerScheduler scheduler = new SubtitleHandlerScheduler();
+                        scheduler.postDelayed(task, delayMs);
+
+                        return () -> scheduler.removeCallbacks(task);
+                    });
+        }
+
+        return mAiSummaryAnalyzer;
+    }
+
+    /** Title of the video being played; missing metadata never blocks the analysis (plan 4.2). */
+    private String videoTitle() {
+        Video video = mVideo != null ? mVideo.get() : null;
+
+        return video != null ? video.title : null;
+    }
+
+    private String videoDescription() {
+        Video video = mVideo != null ? mVideo.get() : null;
+
+        return video != null ? video.description : null;
+    }
+
+    /** Ordered distinct originals from the beginning of the source; the analyzer bounds them. */
+    private static List<String> sampleOriginalLines(SubtitleTimeline timeline) {
+        List<String> samples = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+
+        if (timeline == null) {
+            return samples;
+        }
+
+        for (SubtitleFrame frame : timeline.getFrames()) {
+            for (SubtitleItem item : frame.getItems()) {
+                String text = item.getText();
+
+                if (text == null || text.trim().isEmpty() || !seen.add(item.getItemId())) {
+                    continue;
+                }
+
+                samples.add(text.trim());
+
+                if (samples.size() >= 400) {
+                    return samples; // the analyzer applies the code-point bound
+                }
+            }
+        }
+
+        return samples;
     }
 
     /**
@@ -536,6 +737,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                 // is displayed (plan section 14: the report must work without a timeline).
                 mAiTimelineRequests++;
                 mAiEvents.add("TIMELINE_REQUESTED");
+                syncAiLoadNotificationIdentity();
+                mAiNoticeDelivery.show(mAiLoadNotifications.onSnapshotRequested());
                 return;
             case REUSED:
             case ALREADY_READY:
@@ -631,6 +834,64 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         void onAiSubtitleConnectionTestFinished(SubtitleConnectionTest.Outcome outcome);
     }
 
+    /** The player UI side of the non-modal subtitle load notifications (plan 4.5). */
+    public interface OnAiSubtitleLoadNotice {
+        void onAiSubtitleLoadNotice(SubtitleLoadNotificationPolicy.Stage stage);
+
+        /** The switch was closed or the surface was released: hide a notice already on screen. */
+        void onAiSubtitleLoadNoticeCleared();
+    }
+
+    /** Registers the UI that shows the load notifications; pass null to detach. */
+    public void setAiLoadNoticeListener(final OnAiSubtitleLoadNotice listener) {
+        mAiNoticeDelivery.setUi(listener == null ? null : new SubtitleLoadNoticeDelivery.Ui() {
+            @Override
+            public void onNotice(SubtitleLoadNotificationPolicy.Stage stage) {
+                listener.onAiSubtitleLoadNotice(stage);
+            }
+
+            @Override
+            public void onCleared() {
+                listener.onAiSubtitleLoadNoticeCleared();
+            }
+        });
+    }
+
+    /**
+     * The menu's notification switch. It is persisted by the settings controller and never starts or
+     * cancels work, but closing it must also drop a pending notice and hide the current one instead
+     * of leaving a stale toast on screen (plan 4.5).
+     */
+    public void setAiLoadNotifications(boolean enabled) {
+        buildAiSubtitleChain();
+
+        if (mAiSettings != null) {
+            mAiSettings.setLoadNotifications(enabled);
+        }
+
+        if (!enabled) {
+            cancelPendingAiLoadNotices();
+        }
+    }
+
+    /** Syncs the notification dedupe identity with the live session (source, content generation). */
+    private void syncAiLoadNotificationIdentity() {
+        if (mAiSubtitleBinder != null) {
+            mAiLoadNotifications.setSourceKey(mAiSubtitleBinder.getController().getActiveSourceKey());
+            mAiLoadNotifications.setTranslationGeneration(mAiSubtitleBinder.getController().getTranslationGeneration());
+        } else {
+            mAiLoadNotifications.reset();
+        }
+    }
+
+    /**
+     * Drops every queued load notice and hides the one on screen. Called when the user closes the
+     * notification switch and on engine release (plan 4.5): a stale toast must not survive either.
+     */
+    private void cancelPendingAiLoadNotices() {
+        mAiNoticeDelivery.revoke();
+    }
+
     /**
      * Sends one minimal synthetic batch with the current configuration, so the user can verify a key
      * and an endpoint without playing a video (plan 18.3). It never sends the subtitles being watched
@@ -645,7 +906,24 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             return false;
         }
 
-        cancelAiSubtitleConnectionTest();
+        final SubtitleTranslationDispatcher dispatcher = mAiDispatcher;
+
+        cancelAiSubtitleConnectionTest(); // a superseded attempt must not report for this one
+
+        // The synthetic request uses the same paid service as the session (plan 4.1): the test and a
+        // translation share one slot. A translation in flight refuses the test with explicit feedback,
+        // and the reserved slot refuses the next prefetch tick, so neither start order can put two AI
+        // requests in the air.
+        if (dispatcher != null && !dispatcher.tryAcquireExternalSlot()) {
+            mAiEvents.add("CONNECTION_TEST_BUSY");
+
+            if (listener != null) {
+                mMainHandler.post(() -> listener.onAiSubtitleConnectionTestFinished(
+                        SubtitleConnectionTest.Outcome.BUSY));
+            }
+
+            return false;
+        }
 
         final int generation = mAiConnectionGeneration;
         mAiConnectionHttpStatus = 0;
@@ -659,8 +937,14 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             @Override
             public void onHttpFinished(SubtitleConnectionTest.Outcome outcome, int status) {
                 mMainHandler.post(() -> {
+                    if (dispatcher != null) {
+                        // The terminal callback of this attempt arrived: the shared slot is free even
+                        // when the attempt was superseded in the meantime (plan 4.1).
+                        dispatcher.releaseExternalSlot();
+                    }
+
                     if (generation != mAiConnectionGeneration) {
-                        return;
+                        return; // a superseded attempt must not report or overwrite the current status
                     }
                     mAiConnectionHttpStatus = status >= 100 && status <= 599 ? status : 0;
                     mAiEvents.add("CONNECTION_HTTP_" + mAiConnectionHttpStatus);
@@ -680,6 +964,13 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         return true;
     }
 
+    /**
+     * Invalidates a superseded attempt (its late terminal callback is dropped on the main thread).
+     *
+     * <p>The shared AI slot is deliberately not released here: it is released by the terminal
+     * callback of the attempt that reserved it, so a cancelled transport can never free the slot for
+     * a second call while its own call is still terminating (plan 4.1).
+     */
     private void cancelAiSubtitleConnectionTest() {
         mAiConnectionGeneration++;
         if (mAiConnectionTestCall != null) {
@@ -697,9 +988,12 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         if (accepted && installed) {
             // Includes the reused install: the timeline is in place for the current source afterwards.
             mAiTimelineInstalls++;
+            maybeAnalyzeAiSubtitleContext(); // the sample needs the timeline of this source
         }
 
         mAiEvents.add((accepted ? "SNAPSHOT_" : "SNAPSHOT_STALE_") + status);
+        syncAiLoadNotificationIdentity();
+        mAiNoticeDelivery.show(mAiLoadNotifications.onSnapshotSettled(status, accepted, installed));
     }
 
     /**
@@ -828,6 +1122,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         if (enabled) {
             mAiLoop.start();
             requestAiSubtitleTimeline(); // prepare the timeline of the source already selected
+            maybeAnalyzeAiSubtitleContext(); // the enhanced tier analyses once, before the first batch
         } else {
             // Turning translation off must not discard the original timeline: the local export works
             // without the AI switch and an in-flight snapshot is a plain subtitle read, not a paid call.
@@ -847,6 +1142,62 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         if (mAiSubtitleBinder != null) {
             mAiSubtitleBinder.onDisplayMode(mode);
         }
+    }
+
+    /** Outcome of the forced-retranslation action, so the menu can explain a refusal (plan 4.4). */
+    public enum AiRetranslateOutcome {
+        STARTED,
+        /** The per-video AI switch is off. */
+        AI_OFF,
+        /** No key is configured. */
+        NO_KEY,
+        /** The last attempt was refused by the credentials or the billing state. */
+        AUTH_STOPPED,
+        /** No subtitle source is bound right now. */
+        NO_SOURCE,
+        /** The player surface or the timeline is not ready yet. */
+        NOT_READY
+    }
+
+    /**
+     * Forces retranslation of the current source from the current position (plan 4.4). The stored
+     * translations, the failure budget and the coherent examples of this source are dropped while the
+     * original timeline and the frozen summary survive; the current window is then requested again
+     * under a new generation, so a previous success really produces a new request. Original subtitles
+     * stay visible and the action never claims that the whole video was retranslated.
+     */
+    public AiRetranslateOutcome retranslateAiSubtitles() {
+        buildAiSubtitleChain();
+
+        if (mAiSettings == null || !mAiSettings.getSettings().isEnabled()) {
+            return AiRetranslateOutcome.AI_OFF;
+        }
+
+        if (!mAiSettings.isKeyConfigured()) {
+            return AiRetranslateOutcome.NO_KEY;
+        }
+
+        if (mAiAuthorizationStopped) {
+            return AiRetranslateOutcome.AUTH_STOPPED; // a refused credential needs the settings, not a retry
+        }
+
+        if (mAiSubtitleBinder == null || !isAiSubtitlePlayerReady()
+                || !mAiSubtitleBinder.getController().hasActiveSession()) {
+            return AiRetranslateOutcome.NOT_READY;
+        }
+
+        if (!mAiSubtitleBinder.retranslateCurrentSource()) {
+            return AiRetranslateOutcome.NOT_READY; // no timeline yet: there is nothing to translate again
+        }
+
+        mAiStats.reset();
+        mAiEvents.add("RETRANSLATE");
+
+        if (mAiLoop != null) {
+            mAiLoop.start(); // idempotent; the reset window is planned from the current position
+        }
+
+        return AiRetranslateOutcome.STARTED;
     }
 
     /** Session counters of the AI subtitle work, for the menu and the integration report. */
@@ -1042,6 +1393,10 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         getTickleManager().removeListener(this);
 
         mAiEvents.add("ENGINE_RELEASED");
+        cancelAiSubtitleSummary(); // no analysis of a released surface may settle later
+        mAiSummarySession.reset();
+        cancelPendingAiLoadNotices(); // a released surface must not deliver or keep a notice
+        mAiLoadNotifications.reset();
         cancelAiSubtitleTimeline();
         cancelAiSubtitleConnectionTest();
         mAiTimeline = null; // the coordinator and its identity belong to the released surface
@@ -1137,6 +1492,9 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     @Override
     public void onVideoLoaded(Video item) {
         AiSubtitleSessionBinder subtitles = aiSubtitleBinder();
+
+        cancelAiSubtitleSummary(); // the analysis belonged to the previous video
+        mAiSummarySession.reset();
 
         // The AI switch is per video (plan section 5): a newly loaded video starts with it off, so the
         // clock stops and the prepared timeline of the previous video is abandoned here.

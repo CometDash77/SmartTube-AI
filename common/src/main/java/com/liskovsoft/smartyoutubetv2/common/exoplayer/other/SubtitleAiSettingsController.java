@@ -76,6 +76,64 @@ public class SubtitleAiSettingsController {
         persist();
     }
 
+    /**
+     * Smart-context tier (Kiss feature: smart context, plan section 2): basic neighbours, coherent
+     * examples or the one-shot video enhancement. It changes the request content, so the namespace
+     * changes and the running session is rebuilt exactly once.
+     *
+     * @return true when the tier actually changed
+     */
+    public boolean setContextTier(int contextTier) {
+        if (mSettings.getContextTier() == contextTier) {
+            return false;
+        }
+
+        updateContent(SubtitleAiSettings.withContextTier(mSettings, contextTier));
+
+        return true;
+    }
+
+    /**
+     * Rule segmentation on/off (Kiss feature: rule segmentation). It changes the translated units,
+     * so it is part of the identity and rebuilds the session exactly once.
+     *
+     * @return true when the switch actually changed
+     */
+    public boolean setRuleSegmentation(boolean ruleSegmentation) {
+        if (mSettings.usesRuleSegmentation() == ruleSegmentation) {
+            return false;
+        }
+
+        updateContent(SubtitleAiSettings.withRuleSegmentation(mSettings, ruleSegmentation));
+
+        return true;
+    }
+
+    /**
+     * Load-notification switch (Kiss feature: load notifications). Display-only by plan 4.5: it is
+     * persisted but never invalidates a session, never clears anything and never starts a request.
+     */
+    public void setLoadNotifications(boolean loadNotifications) {
+        if (mSettings.showsLoadNotifications() == loadNotifications) {
+            return;
+        }
+
+        mSettings = SubtitleAiSettings.withLoadNotifications(mSettings, loadNotifications);
+        persist();
+    }
+
+    /** Persists a content-affecting change and notifies once, only when the identity really moved. */
+    private void updateContent(SubtitleAiSettings updated) {
+        boolean contentChanged = !updated.getConfig().namespace().equals(mSettings.getConfig().namespace());
+
+        mSettings = updated;
+        persist();
+
+        if (contentChanged) {
+            notifyConfigurationChanged();
+        }
+    }
+
     /** Endpoint, model, target language and instruction changes void results of the old setup. */
     public void setTargetLanguage(String targetLanguage) {
         updateConfig(mSettings.getConfig().getEndpointBaseUrl(), mSettings.getConfig().getModel(),
@@ -164,7 +222,8 @@ public class SubtitleAiSettingsController {
 
     private void updateConfig(String endpointBaseUrl, String model, String targetLanguage, String instruction) {
         SubtitleAiSettings updated = SubtitleAiSettings.create(mSettings.isEnabled(), mSettings.getDisplayMode(),
-                targetLanguage, instruction, endpointBaseUrl, model);
+                targetLanguage, instruction, endpointBaseUrl, model, mSettings.getContextTier(),
+                mSettings.usesRuleSegmentation(), mSettings.showsLoadNotifications());
 
         if (updated.getConfig().namespace().equals(mSettings.getConfig().namespace())) {
             return; // nothing that affects cached results changed

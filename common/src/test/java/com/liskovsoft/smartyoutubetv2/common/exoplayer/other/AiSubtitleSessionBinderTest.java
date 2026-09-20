@@ -348,4 +348,67 @@ public class AiSubtitleSessionBinderTest {
         assertEquals(SubtitleComposer.MODE_BILINGUAL, mBinder.getController().getDisplayMode());
         assertTrue(mDisplay.actions.contains("mode:" + SubtitleComposer.MODE_BILINGUAL));
     }
+
+    @Test
+    public void appliedTranslationCountCountsOnlyNonBlankVisibleEntries() {
+        mBinder.onVideoLoaded();
+        mBinder.onAiEnabled(true);
+        List<SubtitleItem> frame = Arrays.asList(
+                new SubtitleItem("a", "one"), new SubtitleItem("b", "two"), new SubtitleItem("c", "three"));
+
+        mBinder.applyFrameTranslations(frame, id -> id.equals("a") ? "\u4f60\u597d" : id.equals("b") ? "   " : null);
+
+        assertEquals("blank entries are failures, not visible translations",
+                1, mBinder.getLastAppliedTranslationCount());
+    }
+
+    @Test
+    public void aCachedFrameReachedLaterNotifiesExactlyOnceThroughThePolicy() {
+        SubtitleTranslationCache cache = new SubtitleTranslationCache();
+        cache.put("b", "\u4e16\u754c");
+        mBinder.setTranslationCache(cache);
+        mBinder.onVideoLoaded();
+        mBinder.onAiEnabled(true);
+
+        final List<String> notices = new ArrayList<>();
+        SubtitleLoadNotificationPolicy policy = new SubtitleLoadNotificationPolicy();
+        policy.setSourceKey(mBinder.getController().getActiveSourceKey());
+        policy.setTranslationGeneration(mBinder.getController().getTranslationGeneration());
+        mBinder.setTranslationDisplayListener(() -> {
+            SubtitleLoadNotificationPolicy.Notice notice = policy.onTranslationShown();
+
+            if (notice != null) {
+                notices.add(notice.getStage().name());
+            }
+        });
+
+        // The earlier batch contained only future items: the frame on screen has no stored
+        // translation, so nothing is displayed and the current segment stays silent.
+        mBinder.onFrameItems(Collections.singletonList(new SubtitleItem("a", "One")));
+        assertTrue(mBinder.applyCurrentFrame());
+        assertEquals(Collections.<String>emptyList(), notices);
+
+        // The player reaches the prefetched frame: the repaint from the cache is a real visible
+        // translation and the notice fires (the missing entry of plan 4.5).
+        mBinder.onFrameItems(Collections.singletonList(new SubtitleItem("b", "Two")));
+        assertTrue(mBinder.applyCurrentFrame());
+        assertEquals(Collections.singletonList("TRANSLATION_READY"), notices);
+
+        // The next periodic repaint of the same frame must not repeat the notice.
+        assertTrue(mBinder.applyCurrentFrame());
+        assertEquals(Collections.singletonList("TRANSLATION_READY"), notices);
+    }
+
+    @Test
+    public void aBatchOfOnlyFutureItemsReportsNoVisibleTranslation() {
+        SubtitleTranslationCache cache = new SubtitleTranslationCache();
+        cache.put("future-id", "\u4e16\u754c");
+        mBinder.setTranslationCache(cache);
+        mBinder.onVideoLoaded();
+        mBinder.onAiEnabled(true);
+        mBinder.onFrameItems(Collections.singletonList(new SubtitleItem("visible-id", "One")));
+
+        assertTrue(mBinder.applyCurrentFrame());
+        assertEquals("nothing reached the visible frame", 0, mBinder.getLastAppliedTranslationCount());
+    }
 }

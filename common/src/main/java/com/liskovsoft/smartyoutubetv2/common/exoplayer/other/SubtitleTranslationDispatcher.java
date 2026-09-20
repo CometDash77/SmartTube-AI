@@ -30,6 +30,14 @@ public class SubtitleTranslationDispatcher {
     public interface TranslationService {
         /** Starts a call for the batch; the dispatcher owns the returned call. */
         TranslationCall translate(SubtitleBatch batch, Callback callback);
+
+        /**
+         * Smart-context tier of the configuration that will answer the next batch (plan 4.2). The
+         * default keeps a service without context knowledge on the basic tier.
+         */
+        default int getContextTier() {
+            return SubtitleAiSettings.CONTEXT_BASIC;
+        }
     }
 
     public interface Callback {
@@ -55,6 +63,13 @@ public class SubtitleTranslationDispatcher {
     private SubtitleBatch mInFlight;
     private TranslationCall mInFlightCall;
     private boolean mCancelled;
+    /** Content identity of the translations (plan 4.1): a configuration change or a forced
+     *  retranslation moves it on, so a late callback of the old content can never reach the cache. */
+    private int mContentGeneration;
+    /** True while an out-of-band call (the manual connection test) holds the single AI slot. */
+    private boolean mExternalBusy;
+    /** Session context material (verified examples); a success of this dispatcher feeds it. */
+    private SubtitleSessionContext mSessionContext;
     private long mPositionUs;
     private long mLastStartMs = Long.MIN_VALUE / 2;
     private long mCooldownUntilMs;
@@ -76,6 +91,12 @@ public class SubtitleTranslationDispatcher {
         mPlanner.reset(); // a new snapshot has its own ids: old done/pending bookkeeping is void
     }
 
+    /** Installs the session context: verified successes become examples of the next requests. */
+    public void setSessionContext(SubtitleSessionContext sessionContext) {
+        mSessionContext = sessionContext;
+        mPlanner.setContextSource(sessionContext);
+    }
+
     public void setPosition(long positionUs) {
         mPositionUs = positionUs;
     }
@@ -85,7 +106,7 @@ public class SubtitleTranslationDispatcher {
     }
 
     public boolean isBusy() {
-        return mInFlight != null;
+        return mInFlight != null || mExternalBusy;
     }
 
     /** True while consecutive batch failures pause the session. */
@@ -104,8 +125,8 @@ public class SubtitleTranslationDispatcher {
      * @return true when a call was started
      */
     public boolean tick() {
-        if (mInFlight != null || mTimeline == null) {
-            return false;
+        if (mInFlight != null || mExternalBusy || mTimeline == null) {
+            return false; // one AI slot: an out-of-band test blocks the next prefetch (plan 4.1)
         }
 
         long nowMs = mClock.elapsedRealtimeMs();
@@ -118,6 +139,7 @@ public class SubtitleTranslationDispatcher {
             return false; // batch-failure cooldown: the original subtitles keep playing
         }
 
+        mPlanner.setContextTier(mService.getContextTier()); // the tier of the configuration in use
         SubtitleBatch batch = mPlanner.nextBatch(mTimeline, mPositionUs, mFirstBatch);
 
         if (batch == null) {
@@ -128,15 +150,16 @@ public class SubtitleTranslationDispatcher {
         mInFlight = batch;
         mFirstBatch = false;
         mLastStartMs = nowMs;
+        final int contentGeneration = mContentGeneration;
         mInFlightCall = mService.translate(batch, new Callback() {
             @Override
             public void onSuccess(SubtitleBatch resultBatch, List<String> translations) {
-                handleSuccess(resultBatch, translations);
+                handleSuccess(contentGeneration, resultBatch, translations);
             }
 
             @Override
             public void onFailure(SubtitleBatch resultBatch) {
-                handleFailure(resultBatch);
+                handleFailure(contentGeneration, resultBatch);
             }
         });
 
@@ -161,16 +184,52 @@ public class SubtitleTranslationDispatcher {
         }
     }
 
-    private void handleSuccess(SubtitleBatch batch, List<String> translations) {
+    /**
+     * Endpoint, model, target language, instruction, context tier or segmentation rules changed, or
+     * the user forced a retranslation: the identity moves on <em>before</em> the in-flight call is
+     * cancelled, so a callback that already passed the batch identity check can no longer write the
+     * cache or reach the display (plan 4.1/6.3).
+     */
+    public void invalidateContent() {
+        mContentGeneration++;
+        cancel();
+    }
+
+    /**
+     * Reserves the single AI request slot for an out-of-band call (the manual connection test), so no
+     * translation can start while the test is in flight. The other order is refused with
+     * {@code BUSY} by the caller, which is the same slot seen from both directions (plan 4.1).
+     *
+     * @return true when the slot was free and is now reserved
+     */
+    public boolean tryAcquireExternalSlot() {
+        if (mInFlight != null || mExternalBusy) {
+            return false;
+        }
+
+        mExternalBusy = true;
+
+        return true;
+    }
+
+    /** Releases the slot reserved by {@link #tryAcquireExternalSlot()} after the call terminated. */
+    public void releaseExternalSlot() {
+        mExternalBusy = false;
+    }
+
+    private void handleSuccess(int contentGeneration, SubtitleBatch batch, List<String> translations) {
         if (batch != mInFlight) {
             return; // a replaced batch: never repaint, never cache as current
         }
 
-        boolean cancelled = mCancelled;
+        boolean cancelled = mCancelled || contentGeneration != mContentGeneration;
         release();
 
         if (cancelled) {
-            return; // the position was abandoned: drop the result but free the slot
+            // The position or the configuration was abandoned: drop the result, free the slot and
+            // give the items back to the planner so a later generation can request them again.
+            mPlanner.markFinished(batch, false);
+            return;
         }
 
         mConsecutiveFailures = 0;
@@ -190,20 +249,27 @@ public class SubtitleTranslationDispatcher {
 
         mPlanner.markFinished(batch, true);
 
+        if (mSessionContext != null) {
+            // Only a result accepted for the live attempt becomes an example (plan 4.2): blanks and
+            // answers of an abandoned generation never do.
+            mSessionContext.recordBatch(batch, translations);
+        }
+
         if (mListener != null) {
             mListener.onBatchResult(batch, translations, true);
         }
     }
 
-    private void handleFailure(SubtitleBatch batch) {
+    private void handleFailure(int contentGeneration, SubtitleBatch batch) {
         if (batch != mInFlight) {
             return;
         }
 
-        boolean cancelled = mCancelled;
+        boolean cancelled = mCancelled || contentGeneration != mContentGeneration;
         release();
 
         if (cancelled) {
+            mPlanner.markFinished(batch, false); // abandoned attempt: the items stay replannable
             return;
         }
 

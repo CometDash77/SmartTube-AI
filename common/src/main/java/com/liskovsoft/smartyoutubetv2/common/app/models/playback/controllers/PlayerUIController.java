@@ -36,6 +36,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMe
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter.VideoMenuCallback;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.AutoFrameRateSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiMenuState;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiSettings;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleComposer;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleConnectionTest;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleEndpoint;
@@ -45,6 +46,7 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiSettingsController;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportController;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleExportWriteOutcome;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleLoadNotificationPolicy;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.track.SubtitleTrack;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
@@ -320,6 +322,45 @@ public class PlayerUIController extends BasePlayerController {
         }
 
         if (settings != null) {
+            // Kiss features (plan section 2): context tier and rule segmentation are independent
+            // content choices whose change rebuilds the translation session; the notification
+            // switch is display-only and never starts or cancels a request.
+            SubtitleAiSettingsController contentSettings = settings;
+            int currentTier = settings.getSettings().getContextTier();
+
+            settingsPresenter.appendRadioCategory(getContext().getString(R.string.ai_subtitle_context),
+                    java.util.Arrays.asList(
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_context_basic),
+                                    option -> applyContentSetting(
+                                            contentSettings.setContextTier(SubtitleAiSettings.CONTEXT_BASIC)),
+                                    currentTier == SubtitleAiSettings.CONTEXT_BASIC),
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_context_coherent),
+                                    option -> applyContentSetting(
+                                            contentSettings.setContextTier(SubtitleAiSettings.CONTEXT_COHERENT)),
+                                    currentTier == SubtitleAiSettings.CONTEXT_COHERENT),
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_context_video),
+                                    option -> applyContentSetting(
+                                            contentSettings.setContextTier(SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED)),
+                                    currentTier == SubtitleAiSettings.CONTEXT_VIDEO_ENHANCED)));
+
+            boolean segmented = settings.getSettings().usesRuleSegmentation();
+
+            settingsPresenter.appendRadioCategory(getContext().getString(R.string.ai_subtitle_segmentation),
+                    java.util.Arrays.asList(
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_segmentation_off),
+                                    option -> applyContentSetting(contentSettings.setRuleSegmentation(false)),
+                                    !segmented),
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_segmentation_on),
+                                    option -> applyContentSetting(contentSettings.setRuleSegmentation(true)),
+                                    segmented)));
+
+            settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                    getContext().getString(R.string.ai_subtitle_notifications),
+                    // The switch is persisted by the presenter, which also drops a pending notice and
+                    // hides the current one when it is closed (plan 4.5).
+                    option -> getPlaybackPresenter().setAiLoadNotifications(option.isSelected()),
+                    settings.getSettings().showsLoadNotifications()));
+
             SubtitleAiSettingsController settingsController = settings;
             java.util.List<OptionItem> languageOptions = new java.util.ArrayList<>();
             String currentLanguage = settings.getSettings().getTargetLanguage();
@@ -357,6 +398,12 @@ public class PlayerUIController extends BasePlayerController {
         }
         settingsPresenter.appendSingleButton(UiOptionItem.from(statusText, option -> { }));
 
+        // Forced retranslation of the current source (plan 4.4): an explicit action with its own
+        // receipt, never an automatic switch.
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_retranslate),
+                option -> retranslateAiSubtitles()));
+
         // Two independent, always reachable entries (plan section 14, T13): the diagnostic export
         // must work with no key, with AI off and with a failed snapshot, so it is never hidden
         // behind a developer switch.
@@ -367,6 +414,78 @@ public class PlayerUIController extends BasePlayerController {
         settingsPresenter.appendSingleButton(UiOptionItem.from(
                 getContext().getString(R.string.ai_subtitle_export_diagnostics),
                 option -> startAiSubtitleExport(false)));
+    }
+
+    /**
+     * A context-tier or segmentation change rebuilds the translation session (plan section 2); the
+     * cost note is shown only when a change really happened, so re-selecting the same value is quiet.
+     */
+    private void applyContentSetting(boolean changed) {
+        if (changed && getContext() != null) {
+            MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_content_change_note);
+        }
+    }
+
+    /**
+     * Runs the forced-retranslation transaction and reports what really happened: a refusal is an
+     * actionable state (no key, AI off, nothing selected), never a silent no-op (plan 4.4).
+     */
+    private void retranslateAiSubtitles() {
+        PlaybackPresenter presenter = getPlaybackPresenter();
+
+        if (presenter == null || getContext() == null) {
+            return;
+        }
+
+        MessageHelpers.showMessage(getContext(), aiRetranslateMessage(presenter.retranslateAiSubtitles()));
+    }
+
+    private int aiRetranslateMessage(PlaybackPresenter.AiRetranslateOutcome outcome) {
+        switch (outcome) {
+            case STARTED:
+                return R.string.ai_subtitle_retranslate_started;
+            case AI_OFF:
+                return R.string.ai_subtitle_retranslate_ai_off;
+            case NO_KEY:
+                return R.string.ai_subtitle_retranslate_no_key;
+            case AUTH_STOPPED:
+                return R.string.ai_subtitle_retranslate_auth_failed;
+            case NO_SOURCE:
+                return R.string.ai_subtitle_retranslate_no_source;
+            default:
+                return R.string.ai_subtitle_retranslate_not_ready;
+        }
+    }
+
+    /** Non-modal subtitle load state; a toast never takes focus or pauses playback (plan 4.5). */
+    private void onAiSubtitleLoadNotice(SubtitleLoadNotificationPolicy.Stage stage) {
+        Context context = getContext();
+
+        if (context == null) {
+            return;
+        }
+
+        int resId;
+
+        switch (stage) {
+            case LOADING:
+                resId = R.string.ai_subtitle_notify_loading;
+                break;
+            case ORIGINAL_READY:
+                resId = R.string.ai_subtitle_notify_original_ready;
+                break;
+            case LOAD_FAILED:
+                resId = R.string.ai_subtitle_notify_load_failed;
+                break;
+            case TRANSLATION_READY:
+                resId = R.string.ai_subtitle_notify_translation_ready;
+                break;
+            default:
+                resId = R.string.ai_subtitle_notify_translation_failed;
+                break;
+        }
+
+        MessageHelpers.showMessage(context, resId);
     }
 
     /** Service address, model and expression style; each change voids cached results (plan 6.3). */
@@ -533,6 +652,8 @@ public class PlayerUIController extends BasePlayerController {
                 return R.string.ai_subtitle_test_network;
             case PROTOCOL:
                 return R.string.ai_subtitle_test_protocol;
+            case BUSY:
+                return R.string.ai_subtitle_test_busy;
             default:
                 return R.string.ai_subtitle_test_bad_request;
         }
@@ -708,6 +829,23 @@ public class PlayerUIController extends BasePlayerController {
         }
 
         mEngineReady = true;
+
+        // Non-modal subtitle load notifications (plan 4.5): the presenter decides, the UI shows.
+        if (getPlaybackPresenter() != null) {
+            getPlaybackPresenter().setAiLoadNoticeListener(new PlaybackPresenter.OnAiSubtitleLoadNotice() {
+                @Override
+                public void onAiSubtitleLoadNotice(SubtitleLoadNotificationPolicy.Stage stage) {
+                    PlayerUIController.this.onAiSubtitleLoadNotice(stage);
+                }
+
+                @Override
+                public void onAiSubtitleLoadNoticeCleared() {
+                    // The notification switch was closed or the engine was released: the toast on
+                    // screen belongs to the old state and must not stay until it times out.
+                    MessageHelpers.cancelToasts();
+                }
+            });
+        }
 
         if (isEmbedPlayer()) {
             return;

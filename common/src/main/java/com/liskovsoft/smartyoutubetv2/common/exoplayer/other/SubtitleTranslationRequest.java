@@ -13,11 +13,43 @@ public final class SubtitleTranslationRequest {
     private final String mUrl;
     private final String mAuthorization;
     private final String mBody;
+    /** The instruction this request was built for; null means "the translation instruction". */
+    private final String mSystemInstruction;
 
     private SubtitleTranslationRequest(String url, String authorization, String body) {
+        this(url, authorization, body, null);
+    }
+
+    private SubtitleTranslationRequest(String url, String authorization, String body, String systemInstruction) {
         mUrl = url;
         mAuthorization = authorization;
         mBody = body;
+        mSystemInstruction = systemInstruction;
+    }
+
+    /**
+     * One prepared context-analysis request (plan 4.2). It shares the endpoint, the credential and the
+     * transport with the translations, but has its own fixed instruction and its smaller output bound;
+     * a missing key or an unusable endpoint still returns null instead of calling out.
+     */
+    public static SubtitleTranslationRequest createSummary(SubtitleTranslationConfig config, String apiKey,
+                                                           String payload) throws JSONException {
+        if (config == null) {
+            return null;
+        }
+
+        String url = SubtitleEndpoint.chatCompletionsUrl(config.getEndpointBaseUrl());
+        String authorization = SubtitleCredentials.bearerHeader(apiKey);
+
+        if (url == null || authorization == null) {
+            return null;
+        }
+
+        String instruction = SubtitleProtocolInstruction.summaryInstruction(config.getTargetLanguage());
+        String body = SubtitleRequestBuilder.buildChatCompletionsBody(config, instruction, payload, null,
+                SubtitleRequestBuilder.MAX_SUMMARY_OUTPUT_TOKENS);
+
+        return new SubtitleTranslationRequest(url, authorization, body, instruction);
     }
 
     /**
@@ -36,7 +68,8 @@ public final class SubtitleTranslationRequest {
             return null;
         }
 
-        String payload = SubtitleRequestBuilder.buildPayload(sourceLanguage, config.getTargetLanguage(), batch);
+        String payload = SubtitleRequestBuilder.buildPayload(sourceLanguage, config.getTargetLanguage(), batch,
+                config.getContextTier());
         String body = SubtitleRequestBuilder.buildChatCompletionsBody(config,
                 SubtitleProtocolInstruction.systemInstruction(config.getTargetLanguage(), null), payload,
                 SubtitleProtocolInstruction.cappedStyle(config.getInstruction()));
@@ -64,9 +97,11 @@ public final class SubtitleTranslationRequest {
         return mBody;
     }
 
-    /** The system instruction that belongs to the same configuration. */
+    /** The system instruction that belongs to this request. */
     public String getSystemInstruction(SubtitleTranslationConfig config, String userStyle) {
-        return SubtitleProtocolInstruction.systemInstruction(config != null ? config.getTargetLanguage() : null, userStyle);
+        return mSystemInstruction != null ? mSystemInstruction
+                : SubtitleProtocolInstruction.systemInstruction(
+                        config != null ? config.getTargetLanguage() : null, userStyle);
     }
 
     @Override
