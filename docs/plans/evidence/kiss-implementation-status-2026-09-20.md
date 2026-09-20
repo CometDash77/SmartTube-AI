@@ -43,7 +43,8 @@
 | `:common:compileStbetaDebugJavaWithJavac` | BUILD SUCCESSFUL, exit 0 |
 | `:common:lintStbetaRelease :smarttubetv:compileStbetaDebugJavaWithJavac` | BUILD SUCCESSFUL, exit 0（lint 日志仍出现本机 JDK 11 的 `WorkManagerIssueRegistry` class-file 61 提示，属既有环境现象） |
 | `:smarttubetv:lintStbetaRelease` | **BUILD SUCCESSFUL, exit 0**（1 m 8 s） |
-| GitHub Actions run 35514438045（JDK 11 测试 job，nightly-26） | **success**；`unit-test-reports` 解析：**68 suites / 555 tests / 0 failures / 0 errors / 0 skipped**（新增 `SubtitleRuleSegmenterTest` 17 tests / 0 failures） |
+| GitHub Actions run 35515384600（JDK 11 测试 job，nightly-27，含自查修复） | **success**；**68 suites / 558 tests / 0 failures / 0 errors / 0 skipped** |
+| GitHub Actions run 35514438045（JDK 11 测试 job，nightly-26，已被 nightly-27 替换） | **success**；`unit-test-reports` 解析：**68 suites / 555 tests / 0 failures / 0 errors / 0 skipped**（新增 `SubtitleRuleSegmenterTest` 17 tests / 0 failures） |
 | GitHub Actions run 35510576265（JDK 11 测试 job） | **success**；下载 `unit-test-reports` 解析 XML：**67 suites / 529 tests / 0 failures / 0 errors / 0 skipped**（与本机整模块结果一致） |
 | GitHub Actions run 35510576265（JDK 17 publish job） | **success**；双模块 release lint、`:smarttubetv:assembleStbetaDebug`、`apksigner verify`、prerelease 发布与 artifact 上传全部通过；VirusTotal 按设计跳过 |
 | nightly-26 候选独立复核（本机 SDK build-tools 37.0.0 + JBR 17） | universal APK 45,138,608 B，SHA-256 `70d9be45faa5575de1f9ceffe4343e922b59264426f9af4c204d72f1cd1e6dd3` 与 `SHA256SUMS.txt` 一致；`apksigner` = `Verifies`（v1/v2），证书 `CN=Android Debug` / `2e98a075…`；`aapt` = versionCode 2443 / versionName 32.53-nightly-26 / minSdk 17 / targetSdk 34 |

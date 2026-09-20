@@ -2,7 +2,8 @@
 
 更新：2026-09-20（Asia/Hong_Kong）。本页为当前状态入口，旧文件保留历史证据。
 
-- **当前验收候选 nightly-26（2026-09-20）**：候选 `stbeta-32.53-nightly-26-26-debug`（SHA `4b002bcc`，run 35514438045；68 suites / 555 tests / 0 failures；universal 45,138,608 B / SHA-256 `70d9be45…`）在 nightly-25 之上加入**规则断句整条链路**（合并句子显示 + 派生导出）。这是 debug 回退签名，证书与 nightly-25 不同，**必须先卸载旧包（清空应用数据与 Key）**。验收范围见[计划 §9](kiss-subtitle-features-implementation-plan.md)。
+- **当前验收候选 nightly-27（2026-09-20）**：候选 `stbeta-32.53-nightly-27-27-debug`（SHA `3eb560b0`，run 35515384600；68 suites / 558 tests / 0 failures；universal 45,139,066 B / SHA-256 `02bbf643…`）在 nightly-26 之上修掉自查三处缺陷。debug 回退签名，**必须先卸载旧包**。验收范围见[计划 §9](kiss-subtitle-features-implementation-plan.md)。**nightly-26 含缺陷，不要用于验收。**
+- **nightly-26（已被替换）**：候选 `stbeta-32.53-nightly-26-26-debug`（SHA `4b002bcc`，run 35514438045；68 suites / 555 tests / 0 failures；universal 45,138,608 B / SHA-256 `70d9be45…`）在 nightly-25 之上加入**规则断句整条链路**（合并句子显示 + 派生导出）。这是 debug 回退签名，证书与 nightly-25 不同，**必须先卸载旧包（清空应用数据与 Key）**。验收范围见[计划 §9](kiss-subtitle-features-implementation-plan.md)。
 - **nightly-25 已通过用户测试（2026-09-20）**：候选 `stbeta-32.53-nightly-25-25-debug`（SHA `6c70e370`，run 35510576265；67 suites / 529 tests / 0 failures）在电视上测试没问题；已实现行为清单与下一阶段（K4/K5 规则断句优先 + 设备补齐 + 诊断改进 + 签名 RC）见[增量计划](kiss-subtitle-features-implementation-plan.md) §10 与当天[进度记录](../development/2026-09-20.md)。**规则断句开关当前可见但无行为**，随 K4/K5 一并解决。
 - **nightly-24 已获用户确认：APK 可用，首次打通所需工作流。下一阶段改善精度。** 此结论来自用户实际使用反馈；新版日志由用户交给后续 agent，不代表全部设备、长期运行、重启持久化或稳定签名均已专项验收。
 - 历史故障：nightly-22 日志为 keyConfigured=true、ASR 来源 BOUND、时间轴 OK、875 条原文导出成功，但译文 0；ZIP 中 18 条 FAILED、857 条 NOT_ATTEMPTED。该结果不再代表 nightly-24 当前状态。

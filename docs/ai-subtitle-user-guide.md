@@ -3,7 +3,7 @@
 适用版本：SmartTube stbeta 32.53（本仓库 `production` 分支的 AI 字幕功能）
 日期：2026-09-20（Asia/Hong_Kong）· 包名：`org.smarttube.beta` · minSdk 17 / targetSdk 34
 
-> **当前验收候选 nightly-26（`stbeta-32.53-nightly-26-26-debug`，SHA `4b002bcc`，run 35514438045）**：在 nightly-25（已通过用户测试：智能上下文三档、一次性摘要、强制重翻、可撤销加载通知、四项接线修复）之上加入**规则断句整条链路**——合并为完整句子显示、聚合与回退规则、派生 SRT 导出。CI 68 suites / 555 tests / 0 failures，双模块 release lint、组装与 `apksigner` 校验通过。**它是 debug 回退签名，证书与前几个候选都不同：覆盖安装会被拒绝，需先卸载旧包，会清空应用数据与 Key。** 验收范围见[计划 §9](plans/kiss-subtitle-features-implementation-plan.md)与本文 §4.5/§7。
+> **当前验收候选 nightly-27（`stbeta-32.53-nightly-27-27-debug`，SHA `3eb560b0`，run 35515384600）**：在 nightly-26 之上修掉自查发现的三处缺陷（未变更配置不再重复请求已完成条目；重叠字幕与未知结尾时间改为局部保留原帧，不再让整片规则断句静默失效）。nightly-26 含这三处缺陷，**请勿用它做验收**。原描述（nightly-26）：在 nightly-25（已通过用户测试：智能上下文三档、一次性摘要、强制重翻、可撤销加载通知、四项接线修复）之上加入**规则断句整条链路**——合并为完整句子显示、聚合与回退规则、派生 SRT 导出。CI 68 suites / 555 tests / 0 failures，双模块 release lint、组装与 `apksigner` 校验通过。**它是 debug 回退签名，证书与前几个候选都不同：覆盖安装会被拒绝，需先卸载旧包，会清空应用数据与 Key。** 验收范围见[计划 §9](plans/kiss-subtitle-features-implementation-plan.md)与本文 §4.5/§7。
 >
 > 历史：**nightly-25**（第 1 轮验收候选，用户测试没问题）、**nightly-24（首次打通工作流，已确认可用）**。nightly-22 日志已证实 Key 当前会话可用并导出 875 条原文，但翻译失败。nightly-24 修复了真实请求缺 model/messages、官方响应未解包、配置入口反馈与 HTTP 诊断等问题，456 项测试及完整 CI 通过。见[当前状态](plans/subtitle-current-status.md)与[第四轮报告](plans/evidence/subtitle-round4-service-review.md)。以下使用步骤不等于已完成电视验收。
 

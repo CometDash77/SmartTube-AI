@@ -227,7 +227,7 @@ seek 保留同源摘要和可复用译文、清连贯历史；seek 打断尚未�
 
 目的：让已实现并接线的功能**今天就可在电视上验收**，而不是等四个功能全部完成。规则断句（K4/K5）**不在本轮范围**，见下方“明确不在范围”。
 
-**验收对象（第 2 轮）：prerelease **`stbeta-32.53-nightly-26-26-debug`**，targetCommitish `4b002bcc07bd756f3a63d2fe2aa7916a3f539351`，GitHub run [35514438045](https://github.com/CometDash77/SmartTube-AI/actions/runs/35514438045)（conclusion success，68 suites / 555 tests / 0 failures）；universal 45,138,608 B / SHA-256 `70d9be45…`。它含第 1 轮全部内容，并在其之上加入规则断句（算法/派生显示/派生导出）。
+**验收对象（第 2 轮）：prerelease **`stbeta-32.53-nightly-27-27-debug`**，targetCommitish `3eb560b05d9b94c853ae8ad34214f0a38d4f31b5`，GitHub run [35515384600](https://github.com/CometDash77/SmartTube-AI/actions/runs/35515384600)（conclusion success，68 suites / 558 tests / 0 failures）；universal 45,139,066 B / SHA-256 `02bbf643…`。它含第 1 轮全部内容、规则断句（算法/派生显示/派生导出）以及自查修复的三处缺陷。**已被替换的 `nightly-26` 不要用于验收**（它含未变更配置重复请求、重叠/未知结尾整片回退三处缺陷）。
 
 **第 1 轮验收对象（已通过用户测试）**：prerelease **`stbeta-32.53-nightly-25-25-debug`**，targetCommitish `6c70e37093f0074d624eab6c1a1e9b234d548281`，GitHub run [35510576265](https://github.com/CometDash77/SmartTube-AI/actions/runs/35510576265)（conclusion success，67 suites / 529 tests / 0 failures）。资产：`SmartTube_beta_32.53-nightly-25_{universal,arm64-v8a,armeabi-v7a,x86}.apk` + `SHA256SUMS.txt`；universal 45,130,107 B，SHA-256 `a77af5fc941dcc11cd7c0075a8f1d52aa764c0610a569d2f247165d2d6e9fe43`。版本 `versionCode=2443`、`versionName=32.53-nightly-25`。完整核对见当天[进度记录](../../development/2026-09-20.md)，逐项状态见[实施状态](evidence/kiss-implementation-status-2026-09-20.md)。
 
