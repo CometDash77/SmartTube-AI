@@ -1,0 +1,135 @@
+[
+  {
+    "file": "SmartTube-diagnostics-20260920-2.txt",
+    "sha256": "b5758ee9d554aa759360e538dc9bc5fd0684d8a29a3dadf47222d0c0aa26fe03",
+    "fields": {
+      "generatedAt": "2026-09-20 12:49:08",
+      "appVersionName": "32.53-nightly-18",
+      "aiEnabled": "false",
+      "keyConfigured": "false",
+      "displayMode": "ORIGINAL_ONLY",
+      "sourceBound": "false",
+      "snapshotStatus": "NOT_REQUESTED",
+      "timelineItems": "0",
+      "statsRequests": "0",
+      "statsFailedBatches": "0",
+      "cacheEntries": "0"
+    }
+  },
+  {
+    "file": "SmartTube-diagnostics-20260920-3.txt",
+    "sha256": "a82d1d8f52519f11c56e4f0b63ba725a93f39ce8262556b2205fed5aebf4a9bc",
+    "fields": {
+      "generatedAt": "2026-09-20 12:47:40",
+      "appVersionName": "32.53-nightly-18",
+      "aiEnabled": "false",
+      "keyConfigured": "false",
+      "displayMode": "ORIGINAL_ONLY",
+      "sourceBound": "false",
+      "snapshotStatus": "NOT_REQUESTED",
+      "timelineItems": "0",
+      "statsRequests": "0",
+      "statsFailedBatches": "0",
+      "cacheEntries": "0"
+    }
+  },
+  {
+    "file": "SmartTube-diagnostics-20260920-4.txt",
+    "sha256": "5ace2bbc40d388590b178b69081cd7b039401974f878e20d2591784220416a44",
+    "fields": {
+      "generatedAt": "2026-09-20 11:30:03",
+      "appVersionName": "32.53-nightly-9",
+      "aiEnabled": "false",
+      "keyConfigured": "false",
+      "displayMode": "ORIGINAL_ONLY",
+      "sourceBound": "true",
+      "snapshotStatus": "OK",
+      "timelineItems": "520",
+      "statsRequests": "0",
+      "statsFailedBatches": "0",
+      "cacheEntries": "0"
+    }
+  },
+  {
+    "file": "SmartTube-diagnostics-20260920-5.txt",
+    "sha256": "95b5e82e0bf89293e80b2056165d628003147dc10e0980f974b58748ea375b74",
+    "fields": {
+      "generatedAt": "2026-09-20 12:48:54",
+      "appVersionName": "32.53-nightly-18",
+      "aiEnabled": "true",
+      "keyConfigured": "false",
+      "displayMode": "ORIGINAL_ONLY",
+      "sourceBound": "false",
+      "snapshotStatus": "NOT_REQUESTED",
+      "timelineItems": "0",
+      "statsRequests": "0",
+      "statsFailedBatches": "0",
+      "cacheEntries": "0"
+    }
+  },
+  {
+    "file": "SmartTube-diagnostics-20260920-144125.txt",
+    "sha256": "b8d1a3c9a409ffd0344d3c8251aa7c006839e00a49a0e51b763d10f7b9e8ea86",
+    "fields": {
+      "generatedAt": "2026-09-20 14:41:25",
+      "appVersionName": "32.53-nightly-21",
+      "aiEnabled": "true",
+      "keyConfigured": "false",
+      "displayMode": "ORIGINAL_ONLY",
+      "sourceBound": "false",
+      "subtitlesSelected": "true",
+      "sourceStatus": "SOURCE_AMBIGUOUS",
+      "snapshotStatus": "NOT_REQUESTED",
+      "timelineItems": "0",
+      "statsRequests": "0",
+      "statsFailedBatches": "0",
+      "cacheEntries": "0"
+    }
+  },
+  {
+    "file": "SmartTube-diagnostics-20260920-152007.txt",
+    "sha256": "d44b0b92e911499e731311820abcfcc36b95e0581e9d15b0870d01f2d398ce25",
+    "fields": {
+      "generatedAt": "2026-09-20 15:20:07",
+      "appVersionName": "32.53-nightly-22",
+      "aiEnabled": "true",
+      "keyConfigured": "true",
+      "displayMode": "ORIGINAL_ONLY",
+      "sourceBound": "true",
+      "subtitlesSelected": "true",
+      "sourceStatus": "BOUND",
+      "snapshotStatus": "OK",
+      "timelineItems": "875",
+      "statsRequests": "0",
+      "statsFailedBatches": "2",
+      "cacheEntries": "0"
+    }
+  },
+  {
+    "file": "SmartTube-subtitles-20260920-2.zip",
+    "sha256": "567409e68c97fc61b03fbc9ebdc1b38540ceb253faec281cc086ba98aec6e866",
+    "entries": [
+      "original.srt",
+      "untranslated.srt",
+      "translation-status.txt",
+      "README.txt"
+    ],
+    "statuses": {
+      "NOT_ATTEMPTED": 520
+    }
+  },
+  {
+    "file": "SmartTube-subtitles-20260920-152003.zip",
+    "sha256": "1b1d687bb4689d019f9dd30a6f0ad6f1a80a6741797635619424d315363bd1bc",
+    "entries": [
+      "original.srt",
+      "untranslated.srt",
+      "translation-status.txt",
+      "README.txt"
+    ],
+    "statuses": {
+      "NOT_ATTEMPTED": 857,
+      "FAILED": 18
+    }
+  }
+]

@@ -33,10 +33,10 @@
   <string name="ai_subtitle_key_configured">已配置 Key</string>
   <string name="ai_subtitle_key_missing">尚未配置 Key</string>
   <string name="ai_subtitle_status_auth_failed">密钥被拒绝，请打开 AI 翻译设置</string>
-  <string name="ai_subtitle_endpoint">服务地址：%1$s</string>
+  <string name="ai_subtitle_endpoint">服务地址（点按修改）：%1$s</string>
   <string name="ai_subtitle_endpoint_hint">https://api.deepseek.com</string>
-  <string name="ai_subtitle_endpoint_invalid">请使用 https 服务地址，例如 https://api.deepseek.com</string>
-  <string name="ai_subtitle_model">模型：%1$s</string>
+  <string name="ai_subtitle_endpoint_invalid">请填写 API 基址 https://api.deepseek.com，不是 platform.deepseek.com 管理平台或聊天网页</string>
+  <string name="ai_subtitle_model">模型 ID（点按修改）：%1$s</string>
   <string name="ai_subtitle_instruction">翻译风格</string>
   <string name="ai_subtitle_instruction_hint">可选：希望的译文风格</string>
   <string name="ai_subtitle_instruction_reset">恢复默认翻译风格</string>
@@ -50,7 +50,7 @@
   <string name="ai_subtitle_test_rate_limited">服务正在限流该账户（429）。请稍后再试</string>
   <string name="ai_subtitle_test_server_error">服务当前不可用（5xx）。请稍后再试</string>
   <string name="ai_subtitle_test_network">无法连接到服务。请检查网络与地址</string>
-  <string name="ai_subtitle_test_protocol">服务有应答但格式不符合预期。请检查地址与模型</string>
+  <string name="ai_subtitle_test_protocol">服务已响应，但未取得完整有效译文。请导出诊断；这不代表地址或模型一定错误。</string>
   <string name="ai_subtitle_key_save_failed">密钥保存失败，请重试</string>
   <string name="ai_subtitle_key_session_only">本机 Keystore 不可用，密钥只保留到应用关闭</string>
   <string name="ai_subtitle_clear_key">清除 Key</string>
@@ -812,4 +812,8 @@
   <string name="network_settings">网络设置</string>
   <string name="comments_disabled">此视频已关闭评论</string>
   <string name="remove_video_to_watch_later">从稍后观看移除</string>
+    <string name="ai_subtitle_config_saved">配置已保存。重新打开字幕菜单可查看当前值。</string>
+    <string name="ai_subtitle_request_waiting">正在等待可翻译的字幕原文</string>
+    <string name="ai_subtitle_request_available">已收到译文；请选择“仅译文”或“双语”查看</string>
+    <string name="ai_subtitle_request_failed">翻译失败；请测试连接并导出诊断日志</string>
 </resources>

@@ -57,7 +57,8 @@ public class SubtitleResponseParserTest {
                 "{\"items\":[{\"id\":\"a\",\"translation\":12},{\"id\":\"b\",\"translation\":\"   \"},{\"id\":\"c\"}]}",
                 false, IDS);
 
-        assertFalse(result.isBatchFailed());
+        assertTrue(result.isBatchFailed());
+        assertEquals(SubtitleResponseParser.FAILURE_NO_TRANSLATIONS, result.getFailure());
         assertEquals(0, result.getTranslations().size());
     }
 
@@ -111,5 +112,37 @@ public class SubtitleResponseParserTest {
 
         assertFalse(result.isBatchFailed());
         assertTrue(result.getTranslations().isEmpty());
+    }
+
+    static String completion(String content, String reason) throws Exception {
+        return new org.json.JSONObject().put("choices", new org.json.JSONArray().put(
+                new org.json.JSONObject().put("index", 0).put("finish_reason", reason)
+                        .put("message", new org.json.JSONObject().put("role", "assistant")
+                                .put("content", content)))).toString(2);
+    }
+
+    @Test
+    public void officialChatCompletionEnvelopeDeliversItsMessageContent() throws Exception {
+        String body = completion("{\"items\":[{\"id\":\"a\",\"translation\":\"你好\"}]}", "stop");
+        SubtitleResponseParser.Result result = SubtitleResponseParser.parse(body, false, IDS);
+        assertFalse(result.isBatchFailed());
+        assertEquals("你好", result.getTranslations().get("a"));
+    }
+
+    @Test
+    public void prettyPrintedLengthFinishCannotSlipThrough() throws Exception {
+        String body = completion("{\"items\":[{\"id\":\"a\",\"translation\":\"partial\"}]}", "length");
+        assertEquals(SubtitleResponseParser.FAILURE_TRUNCATED,
+                SubtitleResponseParser.parse(body, false, IDS).getFailure());
+    }
+
+    @Test
+    public void emptyInvalidAndNonTextCompletionsAreNotSuccess() throws Exception {
+        for (String body : Arrays.asList("{\"choices\":[]}",
+                "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":null}}]}",
+                completion("not json", "stop"), completion("{\"items\":[]}", "stop"),
+                completion("{\"items\":[]}", "content_filter"))) {
+            assertTrue(SubtitleResponseParser.parse(body, false, IDS).isBatchFailed());
+        }
     }
 }

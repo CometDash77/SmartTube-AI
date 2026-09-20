@@ -67,6 +67,39 @@ public class SubtitleConnectionTestTest {
     }
 
     @Test
+    public void officialWrappedResponseUsesConfiguredModelAndReportsHttpStatus() throws Exception {
+        List<Integer> statuses = new ArrayList<>();
+        SubtitleTranslationConfig config = new SubtitleTranslationConfig(
+                "https://api.deepseek.com/v1", "deepseek-v4-pro", "zh-Hans", null);
+        tester().test(config, "local-placeholder", null, new SubtitleConnectionTest.Listener() {
+            @Override public void onFinished(SubtitleConnectionTest.Outcome outcome) { mOutcomes.add(outcome); }
+            @Override public void onHttpFinished(SubtitleConnectionTest.Outcome outcome, int status) {
+                statuses.add(status);
+                onFinished(outcome);
+            }
+        });
+        assertEquals("https://api.deepseek.com/v1/chat/completions", mSentRequest.getUrl());
+        assertEquals("deepseek-v4-pro", new org.json.JSONObject(mSentRequest.getBody()).getString("model"));
+        mHandler.onResponse(200, -1, false, SubtitleResponseParserTest.completion(validAnswer(), "stop"));
+        assertEquals(SubtitleConnectionTest.Outcome.OK, last());
+        assertEquals(Integer.valueOf(200), statuses.get(0));
+    }
+
+    @Test
+    public void platformWebsiteIsRejectedWithoutSendingTheKey() {
+        setUpTest(new SubtitleTranslationConfig("https://platform.deepseek.com", null, "zh-Hans", null), "local-placeholder");
+        assertNull(mSentRequest);
+        assertEquals(SubtitleConnectionTest.Outcome.NOT_CONFIGURED, last());
+    }
+
+    @Test
+    public void noTranslatedItemsCannotPassConnectionTest() {
+        setUpTest(config(), "local-placeholder");
+        mHandler.onResponse(200, -1, false, "{\"items\":[]}");
+        assertEquals(SubtitleConnectionTest.Outcome.PROTOCOL, last());
+    }
+
+    @Test
     public void aMissingKeyNeverCallsOut() {
         setUpTest(config(), null);
 

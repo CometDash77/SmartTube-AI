@@ -38,6 +38,10 @@ public class SubtitleConnectionTest {
     /** Called exactly once, possibly on the transport's own thread. */
     public interface Listener {
         void onFinished(Outcome outcome);
+
+        default void onHttpFinished(Outcome outcome, int status) {
+            onFinished(outcome);
+        }
     }
 
     /** Fixed sample text: two short lines with stable ids, no context, no real subtitle content. */
@@ -88,7 +92,9 @@ public class SubtitleConnectionTest {
                 request.getSystemInstruction(config, userStyle), new SubtitleTranslationClient.ResponseHandler() {
                     @Override
                     public void onResponse(int status, long retryAfterMs, boolean truncated, String body) {
-                        finish(listener, classify(status, truncated, body, batch.getItemIds()));
+                        if (listener != null) {
+                            listener.onHttpFinished(classify(status, truncated, body, batch.getItemIds()), status);
+                        }
                     }
 
                     @Override
@@ -108,7 +114,8 @@ public class SubtitleConnectionTest {
         SubtitleResponseParser.Result parsed = SubtitleResponseParser.parse(body, truncated, requestedIds);
 
         // A damaged answer means the endpoint is reachable but not speaking the agreed protocol.
-        return parsed.isBatchFailed() ? Outcome.PROTOCOL : Outcome.OK;
+        return parsed.isBatchFailed() || parsed.getTranslations().size() != requestedIds.size()
+                ? Outcome.PROTOCOL : Outcome.OK;
     }
 
     static Outcome statusOutcome(int status) {

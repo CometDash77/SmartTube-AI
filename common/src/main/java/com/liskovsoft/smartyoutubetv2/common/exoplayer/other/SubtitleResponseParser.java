@@ -27,6 +27,7 @@ public final class SubtitleResponseParser {
     public static final String FAILURE_TRUNCATED = "truncated";
     public static final String FAILURE_MALFORMED = "malformed";
     public static final String FAILURE_NO_ITEMS = "no_items";
+    public static final String FAILURE_NO_TRANSLATIONS = "no_translations";
 
     public static final class Result {
         private final Map<String, String> mTranslations;
@@ -77,7 +78,24 @@ public final class SubtitleResponseParser {
         JSONArray items;
 
         try {
-            items = new JSONObject(body).optJSONArray("items");
+            JSONObject root = new JSONObject(body);
+            // Chat Completions wraps the model's JSON in message.content. The old parser
+            // treated every real API response as missing items; fixtures only supplied content.
+            if (root.has("choices")) {
+                JSONObject choice = root.getJSONArray("choices").getJSONObject(0);
+                if ("length".equals(choice.optString("finish_reason"))) {
+                    return new Result(Collections.<String, String>emptyMap(), FAILURE_TRUNCATED);
+                }
+                if (!"stop".equals(choice.optString("finish_reason"))) {
+                    return new Result(Collections.<String, String>emptyMap(), FAILURE_MALFORMED);
+                }
+                Object content = choice.getJSONObject("message").opt("content");
+                if (!(content instanceof String)) {
+                    return new Result(Collections.<String, String>emptyMap(), FAILURE_EMPTY);
+                }
+                root = new JSONObject((String) content);
+            }
+            items = root.optJSONArray("items");
         } catch (JSONException e) {
             return new Result(Collections.<String, String>emptyMap(), FAILURE_MALFORMED);
         }
@@ -129,6 +147,7 @@ public final class SubtitleResponseParser {
             }
         }
 
-        return new Result(translations, null);
+        return new Result(translations, !requested.isEmpty() && translations.isEmpty()
+                ? FAILURE_NO_TRANSLATIONS : null);
     }
 }

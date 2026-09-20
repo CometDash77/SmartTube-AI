@@ -164,4 +164,17 @@ public class SubtitleAiSettingsControllerTest {
         assertEquals("sk-test", mController.asKeyProvider().getApiKey());
         assertFalse(mController.asConfigProvider().getConfig().namespace().contains("sk-"));
     }
+
+    @Test
+    public void editedModelAndEndpointPersistAndReachTheActualRequest() throws Exception {
+        mController.setEndpointBaseUrl("https://api.deepseek.com/v1");
+        mController.setModel("deepseek-v4-pro");
+        org.json.JSONObject stored = new org.json.JSONObject(mStore.get(SubtitleAiPrefsStore.STORAGE_KEY));
+        assertEquals("deepseek-v4-pro", stored.getString("model"));
+        assertEquals("https://api.deepseek.com/v1", stored.getString("endpoint"));
+        SubtitleTranslationRequest request = SubtitleTranslationRequest.create(
+                mController.asConfigProvider().getConfig(), "local-placeholder", "en", SubtitleConnectionTest.sampleBatch());
+        assertEquals("https://api.deepseek.com/v1/chat/completions", request.getUrl());
+        assertEquals("deepseek-v4-pro", new org.json.JSONObject(request.getBody()).getString("model"));
+    }
 }

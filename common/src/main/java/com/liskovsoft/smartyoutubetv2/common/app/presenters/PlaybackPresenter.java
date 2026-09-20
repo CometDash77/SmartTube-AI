@@ -98,6 +98,17 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     /** Owns the request identity of the one timeline read per source (task N1). */
     private SubtitleTimelineCoordinator mAiTimeline;
     private final SubtitleTranslationStats mAiStats = new SubtitleTranslationStats();
+    private int mAiConnectionHttpStatus;
+    private int mAiConnectionGeneration;
+    private String mAiLastTranslationResult = "NOT_REQUESTED";
+
+    public int getAiConnectionHttpStatus() {
+        return mAiConnectionHttpStatus;
+    }
+
+    public String getAiLastTranslationResult() {
+        return mAiLastTranslationResult;
+    }
     /** Bounded recent session events for the diagnostic export: enumerated codes only, never content. */
     private final SubtitleExportEventLog mAiEvents = new SubtitleExportEventLog(android.os.SystemClock::elapsedRealtime);
     /** Outcome of the last snapshot attempt; the diagnostic report prints it instead of guessing. */
@@ -367,6 +378,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         invalidateAiSubtitleTimeline(); // a new media source invalidates the fetched timeline too
         mAiSnapshotStatus = "NOT_REQUESTED";
         mAiTimelineRequestResult = "NOT_REQUESTED";
+        mAiLastTranslationResult = "NOT_REQUESTED";
         mAiTimelineLastSkipCode = null;
         mAiSubtitlesVisible = null; // visibility is unknown again until the tracks settle
         mAiEvents.add("SOURCE_CHANGED");
@@ -407,23 +419,60 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                     }
 
                     mAiStats.reset();
+                    mAiLastTranslationResult = "NOT_REQUESTED";
+                    mAiAuthorizationStopped = false;
+                    cancelAiSubtitleConnectionTest();
+                    mAiEvents.add("CONFIGURATION_CHANGED");
 
                     // The original timeline is independent of endpoint, model and language, so it must
                     // not be fetched again; re-installing it restarts prefetch for the new
                     // configuration instead of waiting for an unrelated track event (plan 6.3).
                     reinstateAiSubtitleTimeline();
+                    if (mAiLoop != null && mAiSettings.getSettings().isEnabled() && mAiSettings.isKeyConfigured()) {
+                        mAiLoop.start();
+                    }
                 });
         mAiTranslationCache = new SubtitleTranslationCache();
-        mAiTranslationService = new SubtitleTranslationService(new SubtitleOkHttpTranslationClient(),
+        // Dispatcher/cache/display are player state: deliver network callbacks on the main thread.
+        com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationClient client =
+                (request, instruction, handler) -> new SubtitleOkHttpTranslationClient().send(request, instruction,
+                        new com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationClient.ResponseHandler() {
+                            @Override
+                            public void onResponse(int status, long retryAfterMs, boolean truncated, String body) {
+                                mMainHandler.post(() -> handler.onResponse(status, retryAfterMs, truncated, body));
+                            }
+
+                            @Override
+                            public void onTransportFailure() {
+                                mMainHandler.post(handler::onTransportFailure);
+                            }
+                        });
+        mAiTranslationService = new SubtitleTranslationService(client,
                 mAiSettings.asConfigProvider(), mAiSettings.asKeyProvider(),
                 mAiSubtitleBinder::getActiveSourceLanguage, null);
+        mAiTranslationService.setObserver(code -> {
+            if ("REQUEST_STARTED".equals(code)) {
+                mAiStats.onRequestStarted();
+                mAiLastTranslationResult = code;
+            }
+            mAiEvents.add("TRANSLATION_" + code);
+        });
         mAiDispatcher = new SubtitleTranslationDispatcher(new SubtitleBatchPlanner(), mAiTranslationCache,
                 mAiTranslationService,
                 () -> android.os.SystemClock.elapsedRealtime(), (batch, translations, success) -> {
+                    mAiLastTranslationResult = mAiTranslationService.getLastResult();
                     // A finished batch repaints the frame the player is showing; a failure leaves the
                     // original subtitles untouched (the dispatcher has already recorded the attempt).
                     if (success) {
-                        mAiStats.onBatchDelivered(batch != null ? batch.getItems().size() : 0);
+                        int delivered = 0;
+                        if (translations != null) {
+                            for (String translation : translations) {
+                                if (translation != null && !translation.trim().isEmpty()) {
+                                    delivered++;
+                                }
+                            }
+                        }
+                        mAiStats.onBatchDelivered(delivered);
 
                         if (mAiSubtitleBinder != null) {
                             mAiSubtitleBinder.applyCurrentFrame();
@@ -562,6 +611,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
      * cached translations stay valid, because the key is not part of the configuration namespace.
      */
     private void onAiCredentialChanged() {
+        cancelAiSubtitleConnectionTest();
         mAiAuthorizationStopped = false;
         mAiEvents.add("CREDENTIAL_CHANGED");
 
@@ -597,9 +647,28 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
         cancelAiSubtitleConnectionTest();
 
-        SubtitleConnectionTest.Listener forwarder = outcome -> {
-            if (listener != null) {
-                mMainHandler.post(() -> listener.onAiSubtitleConnectionTestFinished(outcome));
+        final int generation = mAiConnectionGeneration;
+        mAiConnectionHttpStatus = 0;
+        mAiEvents.add("CONNECTION_TEST_STARTED");
+        SubtitleConnectionTest.Listener forwarder = new SubtitleConnectionTest.Listener() {
+            @Override
+            public void onFinished(SubtitleConnectionTest.Outcome outcome) {
+                onHttpFinished(outcome, 0);
+            }
+
+            @Override
+            public void onHttpFinished(SubtitleConnectionTest.Outcome outcome, int status) {
+                mMainHandler.post(() -> {
+                    if (generation != mAiConnectionGeneration) {
+                        return;
+                    }
+                    mAiConnectionHttpStatus = status >= 100 && status <= 599 ? status : 0;
+                    mAiEvents.add("CONNECTION_HTTP_" + mAiConnectionHttpStatus);
+                    mAiEvents.add("CONNECTION_" + outcome.name());
+                    if (listener != null) {
+                        listener.onAiSubtitleConnectionTestFinished(outcome);
+                    }
+                });
             }
         };
 
@@ -612,6 +681,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     }
 
     private void cancelAiSubtitleConnectionTest() {
+        mAiConnectionGeneration++;
         if (mAiConnectionTestCall != null) {
             mAiConnectionTestCall.cancel();
             mAiConnectionTestCall = null;

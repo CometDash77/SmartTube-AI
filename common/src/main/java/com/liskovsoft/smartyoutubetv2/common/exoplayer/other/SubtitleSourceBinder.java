@@ -74,7 +74,16 @@ public class SubtitleSourceBinder {
                 byUrl.put(subtitle.getBaseUrl(), bucket);
             }
 
-            bucket.add(subtitle);
+            boolean duplicate = false;
+            for (MediaSubtitle existing : bucket) {
+                if (sameSource(existing, subtitle)) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                bucket.add(subtitle);
+            }
         }
 
         for (SubtitleFormatCandidate candidate : candidates) {
@@ -140,6 +149,18 @@ public class SubtitleSourceBinder {
 
     public Status getStatus() {
         return mStatus;
+    }
+
+    // Duplicate metadata for the same payload is not a second source. Display labels may differ,
+    // but conflicting language/type/identity/decoder metadata must still be rejected as ambiguous.
+    private static boolean sameSource(MediaSubtitle a, MediaSubtitle b) {
+        return equal(a.getVssId(), b.getVssId()) && equal(a.getLanguageCode(), b.getLanguageCode())
+                && equal(a.getType(), b.getType()) && equal(a.getMimeType(), b.getMimeType())
+                && equal(a.getCodecs(), b.getCodecs()) && a.isTranslatable() == b.isTranslatable();
+    }
+
+    private static boolean equal(String a, String b) {
+        return a == null ? b == null : a.equals(b);
     }
 
     public SelectedSubtitleSource getSelectedSource() {

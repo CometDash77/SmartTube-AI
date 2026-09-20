@@ -39,6 +39,27 @@ public class SubtitleTranslationService implements SubtitleTranslationDispatcher
     private long mLastRetryDelayMs;
     /** Set when the service refused the credentials or the billing state; cleared by a success. */
     private boolean mAuthorizationStopped;
+    /** Only fixed local codes/status numbers; no response body, endpoint or credential. */
+    public interface Observer {
+        void onEvent(String code);
+    }
+    private Observer mObserver;
+    private String mLastResult = "NOT_REQUESTED";
+
+    public String getLastResult() {
+        return mLastResult;
+    }
+
+    public void setObserver(Observer observer) {
+        mObserver = observer;
+    }
+
+    private void report(String code) {
+        mLastResult = code;
+        if (mObserver != null) {
+            mObserver.onEvent(code);
+        }
+    }
 
     public SubtitleTranslationService(SubtitleTranslationClient client, ConfigProvider configProvider,
                                       KeyProvider keyProvider, String sourceLanguage, String userStyle) {
@@ -65,21 +86,29 @@ public class SubtitleTranslationService implements SubtitleTranslationDispatcher
             String sourceLanguage = mSourceLanguageProvider != null ? mSourceLanguageProvider.getSourceLanguage() : null;
             request = SubtitleTranslationRequest.create(config, apiKey, sourceLanguage, batch);
         } catch (JSONException e) {
+            report("REQUEST_INVALID");
             callback.onFailure(batch);
             return NO_CALL;
         }
 
         if (request == null) {
+            report("NOT_CONFIGURED");
             callback.onFailure(batch); // no endpoint or no key: never call out
             return NO_CALL;
         }
 
+        mLastRetryDelayMs = 0;
+        mAuthorizationStopped = false;
+        report("REQUEST_STARTED");
         SubtitleTranslationClient.Cancellable call = mClient.send(request,
                 request.getSystemInstruction(config, mUserStyle), new SubtitleTranslationClient.ResponseHandler() {
                     @Override
                     public void onResponse(int status, long retryAfterMs, boolean truncated, String body) {
                         SubtitleResponseHandler.Outcome outcome = SubtitleResponseHandler.handle(
                                 status, retryAfterMs, 0, truncated, body, batch.getItemIds());
+                        report("HTTP_" + (status >= 100 && status <= 599 ? status : 0));
+                        report(outcome.isDelivered() ? "DELIVERED"
+                                : (status == 200 ? "PROTOCOL_FAILED" : "REQUEST_FAILED"));
 
                         mLastRetryDelayMs = outcome.isDelivered() ? 0 : outcome.getDelayMs();
                         // 401/403/402 stop the configuration session instead of being retried; the
@@ -97,6 +126,7 @@ public class SubtitleTranslationService implements SubtitleTranslationDispatcher
 
                     @Override
                     public void onTransportFailure() {
+                        report("NETWORK_FAILED");
                         callback.onFailure(batch);
                     }
                 });

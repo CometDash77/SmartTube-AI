@@ -114,7 +114,7 @@ public class SubtitleSourceBinderTest {
     }
 
     @Test
-    public void refusesToGuessWhenTwoSourcesShareTheSameUrl() {
+    public void equivalentDuplicateMetadataDoesNotMakeTheSourceAmbiguous() {
         Format format = format("en", "English");
         SubtitleSourceBinder binder = new SubtitleSourceBinder();
 
@@ -122,10 +122,21 @@ public class SubtitleSourceBinderTest {
                         subtitle("en", "en", "English duplicate", ORIGIN_URL)),
                 Collections.singletonList(new SubtitleFormatCandidate(format, ORIGIN_URL)));
 
+        assertNotNull(binder.resolve(format));
+        assertEquals(SubtitleSourceBinder.Status.BOUND, binder.getStatus());
+        assertEquals(1, binder.getBoundCount());
+        assertEquals(0, binder.getRejectedCount());
+    }
+
+    @Test
+    public void conflictingLanguagesAtOneUrlRemainAmbiguous() {
+        Format format = format("en", "English");
+        SubtitleSourceBinder binder = new SubtitleSourceBinder();
+        binder.bind(Arrays.asList(subtitle("en", "en", "English", ORIGIN_URL),
+                        subtitle("en", "fr", "French", ORIGIN_URL)),
+                Collections.singletonList(new SubtitleFormatCandidate(format, ORIGIN_URL)));
         assertNull(binder.resolve(format));
         assertEquals(SubtitleSourceBinder.Status.SOURCE_AMBIGUOUS, binder.getStatus());
-        assertEquals(0, binder.getBoundCount());
-        assertEquals(1, binder.getRejectedCount());
     }
 
     @Test

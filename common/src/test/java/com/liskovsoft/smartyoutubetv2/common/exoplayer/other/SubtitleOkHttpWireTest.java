@@ -128,6 +128,36 @@ public class SubtitleOkHttpWireTest {
     }
 
     @Test
+    public void officialEnvelopeTraversesHttpServiceAndSubtitleValidation() throws Exception {
+        String body = SubtitleResponseParserTest.completion(
+                "{\"items\":[{\"id\":\"a\",\"translation\":\"translated\"}]}", "stop");
+        String[] requestLine = new String[1];
+        try (ServerSocket server = startServer("HTTP/1.1 200 OK", "Content-Type: application/json\r\n", body, requestLine)) {
+            // Rewrite only inside this offline test. Production still requires HTTPS and no redirects.
+            okhttp3.OkHttpClient http = new okhttp3.OkHttpClient.Builder().addInterceptor(chain ->
+                    chain.proceed(chain.request().newBuilder().url("http://127.0.0.1:"
+                            + server.getLocalPort() + "/chat/completions").build())).build();
+            SubtitleTranslationService service = new SubtitleTranslationService(
+                    new SubtitleOkHttpTranslationClient(http),
+                    () -> new SubtitleTranslationConfig(null, "deepseek-flash", "zh-Hans", null),
+                    () -> "local-placeholder", "en", null);
+            java.util.List<String> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+            service.setObserver(events::add);
+            BlockingQueue<String> result = new ArrayBlockingQueue<>(1);
+            SubtitleBatch batch = new SubtitleBatch(java.util.Collections.singletonList(
+                    new SubtitleItem("a", "Hello")), null, null);
+            service.translate(batch, new SubtitleTranslationDispatcher.Callback() {
+                @Override public void onSuccess(SubtitleBatch sent, java.util.List<String> translations) {
+                    result.offer(translations.get(0));
+                }
+                @Override public void onFailure(SubtitleBatch sent) { result.offer("FAILED"); }
+            });
+            assertEquals("translated", result.poll(20, TimeUnit.SECONDS));
+            assertEquals(java.util.Arrays.asList("REQUEST_STARTED", "HTTP_200", "DELIVERED"), events);
+        }
+    }
+
+    @Test
     public void anUnreachableServiceIsReportedAsATransportFailure() throws Exception {
         ServerSocket server = new ServerSocket(0);
         int port = server.getLocalPort();

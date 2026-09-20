@@ -33,10 +33,10 @@
       <string name="ai_subtitle_key_configured">Key configured</string>
     <string name="ai_subtitle_key_missing">No key configured</string>
     <string name="ai_subtitle_status_auth_failed">The key was rejected; open AI translation settings</string>
-    <string name="ai_subtitle_endpoint">Service address: %1$s</string>
+    <string name="ai_subtitle_endpoint">Service address (tap to edit): %1$s</string>
     <string name="ai_subtitle_endpoint_hint">https://api.deepseek.com</string>
-    <string name="ai_subtitle_endpoint_invalid">Use an https service address such as https://api.deepseek.com</string>
-    <string name="ai_subtitle_model">Model: %1$s</string>
+    <string name="ai_subtitle_endpoint_invalid">Use an API base URL such as https://api.deepseek.com, not platform.deepseek.com or the chat website</string>
+    <string name="ai_subtitle_model">Model ID (tap to edit): %1$s</string>
     <string name="ai_subtitle_instruction">Translation style</string>
     <string name="ai_subtitle_instruction_hint">Optional: how the translation should read</string>
     <string name="ai_subtitle_instruction_reset">Reset translation style</string>
@@ -50,7 +50,7 @@
     <string name="ai_subtitle_test_rate_limited">The service is rate limiting this account (429). Wait and try again</string>
     <string name="ai_subtitle_test_server_error">The service is unavailable right now (5xx). Try again later</string>
     <string name="ai_subtitle_test_network">No connection to the service. Check the network and the address</string>
-    <string name="ai_subtitle_test_protocol">The service answered but not in the expected format. Check the address and the model</string>
+    <string name="ai_subtitle_test_protocol">The service responded, but no complete valid translation was received. Export diagnostics; this does not prove the address or model is wrong.</string>
     <string name="ai_subtitle_key_save_failed">The key could not be saved. Try again</string>
     <string name="ai_subtitle_key_session_only">This device Keystore is unavailable, so the key is kept only until the app closes</string>
     <string name="ai_subtitle_clear_key">Clear key</string>
@@ -819,4 +819,8 @@
         <item quantity="one">%s second</item>
         <item quantity="other">%s seconds</item>
     </plurals>
+    <string name="ai_subtitle_config_saved">Configuration saved. Reopen the subtitle menu to see the current value.</string>
+    <string name="ai_subtitle_request_waiting">Waiting for subtitle text to translate</string>
+    <string name="ai_subtitle_request_available">Translations received; select translated or bilingual display to view them</string>
+    <string name="ai_subtitle_request_failed">Translation failed; test the connection and export diagnostics</string>
 </resources>

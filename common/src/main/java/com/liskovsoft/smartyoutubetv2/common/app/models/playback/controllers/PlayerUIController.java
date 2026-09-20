@@ -290,6 +290,7 @@ public class PlayerUIController extends BasePlayerController {
             // The key entry is deliberately near the top of the area and says what it is: the previous
             // label shared the generic "AI translation settings" text, so it was not recognisable.
             appendAiKeyEntries(settingsPresenter, settings);
+            appendAiServiceEntries(settingsPresenter, settings);
         }
 
         if (settings != null) {
@@ -333,10 +334,6 @@ public class PlayerUIController extends BasePlayerController {
                     languageOptions);
         }
 
-        if (settings != null) {
-            appendAiServiceEntries(settingsPresenter, settings);
-        }
-
         settingsPresenter.appendSingleButton(UiOptionItem.from(
                 getContext().getString(R.string.ai_subtitle_guide_export), option -> { }));
 
@@ -349,8 +346,16 @@ public class PlayerUIController extends BasePlayerController {
                 getPlaybackPresenter().isAiSubtitlePlayerReady(),
                 getPlaybackPresenter().getAiSubtitlePauseMs());
 
-        settingsPresenter.appendSingleButton(UiOptionItem.from(
-                getContext().getString(aiSubtitleStatusResId(status)), option -> { }));
+        String statusText = getContext().getString(aiSubtitleStatusResId(status));
+        if (status == SubtitleAiMenuState.Status.TRANSLATING) {
+            String result = getPlaybackPresenter().getAiLastTranslationResult();
+            int resultRes = "REQUEST_STARTED".equals(result) ? R.string.ai_subtitle_status_translating
+                    : "DELIVERED".equals(result) ? R.string.ai_subtitle_request_available
+                    : "NOT_REQUESTED".equals(result) ? R.string.ai_subtitle_request_waiting
+                    : R.string.ai_subtitle_request_failed;
+            statusText = getContext().getString(resultRes);
+        }
+        settingsPresenter.appendSingleButton(UiOptionItem.from(statusText, option -> { }));
 
         // Two independent, always reachable entries (plan section 14, T13): the diagnostic export
         // must work with no key, with AI off and with a failed snapshot, so it is never hidden
@@ -371,9 +376,10 @@ public class PlayerUIController extends BasePlayerController {
         settingsPresenter.appendSingleButton(UiOptionItem.from(
                 getContext().getString(R.string.ai_subtitle_endpoint, endpoint),
                 option -> SimpleEditDialog.show(getContext(),
-                        getContext().getString(R.string.ai_subtitle_endpoint),
+                        getContext().getString(R.string.ai_subtitle_endpoint,
+                                settings.getSettings().getConfig().getEndpointBaseUrl()),
                         getContext().getString(R.string.ai_subtitle_endpoint_hint),
-                        endpoint,
+                        settings.getSettings().getConfig().getEndpointBaseUrl(),
                         newValue -> {
                             if (SubtitleEndpoint.chatCompletionsUrl(newValue) == null) {
                                 MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_endpoint_invalid);
@@ -382,6 +388,7 @@ public class PlayerUIController extends BasePlayerController {
                             }
 
                             settings.setEndpointBaseUrl(newValue.trim());
+                            MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_config_saved);
 
                             return true;
                         })));
@@ -391,10 +398,15 @@ public class PlayerUIController extends BasePlayerController {
         settingsPresenter.appendSingleButton(UiOptionItem.from(
                 getContext().getString(R.string.ai_subtitle_model, model),
                 option -> SimpleEditDialog.show(getContext(),
-                        getContext().getString(R.string.ai_subtitle_model),
-                        model,
+                        getContext().getString(R.string.ai_subtitle_model,
+                                settings.getSettings().getConfig().getModel()),
+                        settings.getSettings().getConfig().getModel(),
                         newValue -> {
+                            if (newValue.trim().isEmpty()) {
+                                return false;
+                            }
                             settings.setModel(newValue.trim());
+                            MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_config_saved);
 
                             return true;
                         })));
@@ -495,7 +507,12 @@ public class PlayerUIController extends BasePlayerController {
             return;
         }
 
-        MessageHelpers.showLongMessage(context, aiSubtitleConnectionOutcomeResId(outcome));
+        int status = getPlaybackPresenter() != null ? getPlaybackPresenter().getAiConnectionHttpStatus() : 0;
+        String message = context.getString(aiSubtitleConnectionOutcomeResId(outcome));
+        if (status > 0) {
+            message += " (HTTP " + status + ")";
+        }
+        MessageHelpers.showLongMessage(context, message);
     }
 
     private static int aiSubtitleConnectionOutcomeResId(SubtitleConnectionTest.Outcome outcome) {

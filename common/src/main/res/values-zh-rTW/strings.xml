@@ -33,10 +33,10 @@
   <string name="ai_subtitle_key_configured">已設定 Key</string>
   <string name="ai_subtitle_key_missing">尚未設定 Key</string>
   <string name="ai_subtitle_status_auth_failed">金鑰被拒絕，請開啟 AI 翻譯設定</string>
-  <string name="ai_subtitle_endpoint">服務位址：%1$s</string>
+  <string name="ai_subtitle_endpoint">服務位址（點按修改）：%1$s</string>
   <string name="ai_subtitle_endpoint_hint">https://api.deepseek.com</string>
-  <string name="ai_subtitle_endpoint_invalid">請使用 https 服務位址，例如 https://api.deepseek.com</string>
-  <string name="ai_subtitle_model">模型：%1$s</string>
+  <string name="ai_subtitle_endpoint_invalid">請填寫 API 基址 https://api.deepseek.com，不是 platform.deepseek.com 管理平台或聊天網頁</string>
+  <string name="ai_subtitle_model">模型 ID（點按修改）：%1$s</string>
   <string name="ai_subtitle_instruction">翻譯風格</string>
   <string name="ai_subtitle_instruction_hint">可選：希望的譯文風格</string>
   <string name="ai_subtitle_instruction_reset">恢復預設翻譯風格</string>
@@ -50,7 +50,7 @@
   <string name="ai_subtitle_test_rate_limited">服務正在限制此帳戶的流量（429）。請稍後再試</string>
   <string name="ai_subtitle_test_server_error">服務目前無法使用（5xx）。請稍後再試</string>
   <string name="ai_subtitle_test_network">無法連線到服務。請檢查網路與位址</string>
-  <string name="ai_subtitle_test_protocol">服務有回應但格式不符預期。請檢查位址與模型</string>
+  <string name="ai_subtitle_test_protocol">服務已回應，但未取得完整有效譯文。請匯出診斷；這不代表位址或模型一定錯誤。</string>
   <string name="ai_subtitle_key_save_failed">金鑰儲存失敗，請重試</string>
   <string name="ai_subtitle_key_session_only">本機 Keystore 無法使用，金鑰僅保留至應用程式關閉</string>
   <string name="ai_subtitle_clear_key">清除 Key</string>
@@ -811,4 +811,8 @@
   <string name="enable_conscrypt_desc">改進某些裝置 HTTPS、TLS 和 VPN 的相容性，但偶爾可能會導致播放問題或降低網路效能</string>
   <string name="comments_disabled">此影片已關閉留言</string>
   <string name="color_scheme_dark_blue_oled">深藍色 (OLED)</string>
+    <string name="ai_subtitle_config_saved">設定已儲存。重新開啟字幕選單可查看目前值。</string>
+    <string name="ai_subtitle_request_waiting">正在等待可翻譯的字幕原文</string>
+    <string name="ai_subtitle_request_available">已收到譯文；請選擇「僅譯文」或「雙語」查看</string>
+    <string name="ai_subtitle_request_failed">翻譯失敗；請測試連線並匯出診斷紀錄</string>
 </resources>

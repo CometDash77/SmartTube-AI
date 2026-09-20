@@ -39,6 +39,13 @@ public final class SubtitleEndpoint {
             return null;
         }
 
+        // These are websites, not API endpoints. Never send a credential to a console URL.
+        if ("platform.deepseek.com".equalsIgnoreCase(uri.getHost())
+                || "chat.deepseek.com".equalsIgnoreCase(uri.getHost())
+                || "api-docs.deepseek.com".equalsIgnoreCase(uri.getHost())) {
+            return null;
+        }
+
         String path = uri.getPath() == null ? "" : uri.getPath();
 
         while (path.endsWith("/")) {
