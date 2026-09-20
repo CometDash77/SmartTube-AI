@@ -1,13 +1,13 @@
 # Reliable review and handoff
 
-> Current subtitle status and next implementation scope: [current status](../plans/subtitle-current-status.md) and [production rework plan](../plans/subtitle-production-rework-plan.md). Historical plan sections below retain delivery constraints, not a claim that TV acceptance passed.
+> Current subtitle status: [current status](../plans/subtitle-current-status.md). The user accepted the nightly-24 workflow; next software work concerns accuracy using new device evidence. The [production rework plan](../plans/subtitle-production-rework-plan.md) is historical, not the automatic next queue. Jev tooling scope and compaction prerequisites: [retrospective](../research/jev-compaction-retrospective.md).
 
 ## Navigation and execution
 
 - Current subtitle requirements and GitHub delivery policy: `docs/plans/deepseek-subtitle-dsh-ptc-plan.md`, sections 14–15. Build/test/lint/package/signature checks run in GitHub Actions; local source and documentation checks do not substitute for CI.
 - Read the daily record's current summary before its historical rounds. Old observations are evidence, not current task instructions. Preserve history and label superseded status explicitly.
 - Build/signing configuration: `.github/workflows/CI.yml`, `smarttubetv/build.gradle`, and `.agents/skills/smarttube-build/`. Do not print local.properties, keystores or secret values.
-- Export reuse candidates: `BackupAndRestoreHelper.exportAppMediaFolder`, `MediaStoreFile`, and the subtitle timeline/cache. T13 remains planned until implementation evidence exists.
+- Export reuse candidates: `BackupAndRestoreHelper.exportAppMediaFolder`, `MediaStoreFile`, and the subtitle timeline/cache. T13 has implementation and original-export device evidence; consult current status and dated records for the accepted scope.
 
 ## Before reporting a change
 
