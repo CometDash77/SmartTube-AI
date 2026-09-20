@@ -30,6 +30,8 @@ New sessions need a durable account of local development without relying on conv
 
 ## Verification and acceptance
 
+- For handoff quality and efficient evidence handling, see [review-handoff.md](review-handoff.md). Run `python -B scripts/check-development-docs.py <changed paths>` for local documentation checks; this is an explicit command, not an automatic hook.
+
 - The root `AGENTS.md` links to this document and mandates reading and updating records.
 - Daily filenames use real ISO calendar dates and are unique per date; all same-day work stays in that file.
 - Required sections are present, links resolve, and recorded outcomes match the actual checks.

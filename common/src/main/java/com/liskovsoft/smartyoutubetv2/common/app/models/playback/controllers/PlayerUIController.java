@@ -32,6 +32,14 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.SearchPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMenuPresenter.VideoMenuCallback;
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.AutoFrameRateSettingsPresenter;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiMenuState;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleComposer;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleKeyStore;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleKeyStores;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTargetLanguages;
+import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
+import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiSettingsController;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.track.SubtitleTrack;
 import com.liskovsoft.smartyoutubetv2.common.misc.MediaServiceManager;
@@ -243,7 +251,128 @@ public class PlayerUIController extends BasePlayerController {
         OptionCategory positionCategory = AppDialogUtil.createSubtitlePositionCategory(getContext());
         settingsPresenter.appendRadioCategory(positionCategory.title, positionCategory.options);
 
+        appendAiSubtitleCategory(settingsPresenter);
+
         settingsPresenter.showDialog(subtitlesOrigCategoryTitle, mSetSubtitleButtonState);
+    }
+
+    /**
+     * The AI area of the existing subtitle menu (plan section 5): one per-video switch and the status
+     * line, both built with the same option helpers the rest of the dialog uses. Detailed settings
+     * (target language, display mode, key) belong to the follow-up entries of this area.
+     */
+    private void appendAiSubtitleCategory(AppDialogPresenter settingsPresenter) {
+        if (getPlaybackPresenter() == null) {
+            return;
+        }
+
+        SubtitleAiSettingsController settings = getPlaybackPresenter().getAiSubtitleSettings();
+        boolean enabled = settings != null && settings.getSettings().isEnabled();
+
+        settingsPresenter.appendSingleSwitch(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_enabled),
+                option -> getPlaybackPresenter().applyAiEnabled(option.isSelected()),
+                enabled));
+
+        if (settings != null) {
+            SubtitleAiSettingsController settingsController = settings;
+            int currentMode = settings.getSettings().getDisplayMode();
+
+            settingsPresenter.appendRadioCategory(getContext().getString(R.string.ai_subtitle_display_mode),
+                    java.util.Arrays.asList(
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_mode_original),
+                                    option -> {
+                                        settingsController.setDisplayMode(SubtitleComposer.MODE_ORIGINAL_ONLY);
+                                        getPlaybackPresenter().applyAiDisplayMode(SubtitleComposer.MODE_ORIGINAL_ONLY);
+                                    },
+                                    currentMode == SubtitleComposer.MODE_ORIGINAL_ONLY),
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_mode_translation),
+                                    option -> {
+                                        settingsController.setDisplayMode(SubtitleComposer.MODE_TRANSLATION_ONLY);
+                                        getPlaybackPresenter().applyAiDisplayMode(SubtitleComposer.MODE_TRANSLATION_ONLY);
+                                    },
+                                    currentMode == SubtitleComposer.MODE_TRANSLATION_ONLY),
+                            UiOptionItem.from(getContext().getString(R.string.ai_subtitle_mode_bilingual),
+                                    option -> {
+                                        settingsController.setDisplayMode(SubtitleComposer.MODE_BILINGUAL);
+                                        getPlaybackPresenter().applyAiDisplayMode(SubtitleComposer.MODE_BILINGUAL);
+                                    },
+                                    currentMode == SubtitleComposer.MODE_BILINGUAL)));
+        }
+
+        if (settings != null) {
+            SubtitleAiSettingsController settingsController = settings;
+            java.util.List<OptionItem> languageOptions = new java.util.ArrayList<>();
+            String currentLanguage = settings.getSettings().getTargetLanguage();
+
+            for (String code : SubtitleTargetLanguages.getCodes()) {
+                languageOptions.add(UiOptionItem.from(SubtitleTargetLanguages.getDisplayName(code),
+                        option -> settingsController.setTargetLanguage(code),
+                        code.equals(currentLanguage)));
+            }
+
+            settingsPresenter.appendRadioCategory(getContext().getString(R.string.ai_subtitle_target_language),
+                    languageOptions);
+        }
+
+        SubtitleKeyStore keyStore = SubtitleKeyStores.create(getContext());
+        boolean keyConfigured = settings != null && settings.isKeyConfigured();
+
+        settingsPresenter.appendSingleButton(UiOptionItem.from(getContext().getString(R.string.ai_subtitle_settings),
+                option -> SimpleEditDialog.showPassword(getContext(),
+                        getContext().getString(R.string.ai_subtitle_settings),
+                        null,
+                        newValue -> {
+                            if (keyStore == null || newValue == null || newValue.trim().isEmpty()) {
+                                return false; // the plan refuses an empty key submission
+                            }
+
+                            boolean saved = keyStore.save(newValue);
+
+                            if (saved && getPlaybackPresenter() != null) {
+                                getPlaybackPresenter().requestAiSubtitleTimeline();
+                            }
+
+                            return saved;
+                        })));
+
+        if (keyConfigured) {
+            SubtitleAiSettingsController settingsToClear = settings;
+
+            settingsPresenter.appendSingleButton(UiOptionItem.from(getContext().getString(R.string.ai_subtitle_clear_key),
+                    option -> {
+                        if (settingsToClear != null) {
+                            settingsToClear.clearKey();
+                        }
+
+                        if (keyStore != null) {
+                            keyStore.clear();
+                        }
+                    }));
+        }
+
+        SubtitleAiMenuState.Status status = SubtitleAiMenuState.of(enabled,
+                getPlayer() != null && getPlayer().getSubtitleFormat() != null,
+                settings != null && settings.isKeyConfigured(),
+                getPlaybackPresenter().getAiSubtitlePauseMs());
+
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(aiSubtitleStatusResId(status)), option -> { }));
+    }
+
+    private static int aiSubtitleStatusResId(SubtitleAiMenuState.Status status) {
+        switch (status) {
+            case NO_KEY:
+                return R.string.ai_subtitle_status_no_key;
+            case NO_SOURCE:
+                return R.string.ai_subtitle_status_no_source;
+            case PAUSED:
+                return R.string.ai_subtitle_status_paused;
+            case TRANSLATING:
+                return R.string.ai_subtitle_status_translating;
+            default:
+                return R.string.ai_subtitle_status_translating;
+        }
     }
 
     private void onPlaylistAddClicked() {

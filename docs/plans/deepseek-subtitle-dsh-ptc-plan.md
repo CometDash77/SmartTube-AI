@@ -1,8 +1,10 @@
 # SmartTube 播放器 DeepSeek 字幕翻译开发计划
 
-日期：2026-09-19，Asia/Hong_Kong。交付状态：**计划已编写，任务 T00–T12 均未执行；没有开始应用实现。**
+日期：2026-09-19，Asia/Hong_Kong。交付状态：计划已编写；**2026-09-20 起已按本计划实施**，执行断点、逐任务状态、已验证门禁与未决缺口见文末 **§13 执行状态与断点**。本节的原始计划正文保持原样，未被改写。
 
 执行对象：DeepSeek V4.1 Flash + DeepSeek Harness（DSH）PTC。设计与证据判断由本轮 Astra 完成；DSH 按依赖逐项实现、检查和修正。本文不是新的自动执行授权。
+
+**2026-09-20 执行方式更新：后续编译、Gradle 测试、lint、APK 打包与签名验证均在 GitHub Actions 完成，测试包通过 GitHub prerelease 交付。不得以本地构建代替。§15 优先于本文及旧启动 prompt 中“本地编译”和笼统“不提交、不推送、不发布”的旧措辞；本次只更新计划，不立即触发发布。**
 
 ## 1. 要交付的播放器行为
 
@@ -567,3 +569,110 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 > 在 D:\VibeCoding\SmartTube-AI 按 docs/plans/deepseek-subtitle-dsh-ptc-plan.md 实施播放器 DeepSeek 字幕翻译。使用已选择的 DeepSeek V4.1 Flash 和 DSH PTC，先读AGENTS、进度README、最新及当天香港日期记录、smarttube-deepseek-ptc与smarttube-jev-triage技能。确认run_code和真实生成SDK，T00后按T01–T12依赖逐项推进。先证明所选轨、原生时间轴和fake译文三模式，再接调度、网络、Key和原字幕菜单；不要先生成设置页或大型架构。每任务完成相关验证和修正，保留用户现有改动及子模块版本。把Jev用于多个有实际价值的语义判断，保存原始输入/结果和回源结论，失败立即人工式回源，不凑数、不把它当测试。按需运行现有wrapper/JDK17/stbeta检查；未经授权不安装设备、调用真实付费Key、提交、推送或发布。只把实际通过的检查写为通过；每个里程碑重读并更新唯一每日记录。若某个任务受真实环境阻碍，完成独立可做部分并指出具体缺口，不用泛化审批暂停整项工作。
 
 交付时应能直接回答：用户正在看当前轨的字幕，开启AI后哪里接入、何时得到译文、三模式怎样切换、慢网和错误怎样仍能看原文、关闭后怎样恢复；并给出每项的实际代码与验证证据。
+
+## 13. 执行状态与断点（2026-09-20，Asia/Hong_Kong）
+
+本节由执行会话追加，用于把本计划变成可续接的状态记录。它只陈述实际发生并留下证据的结果；逐轮命令、结果、失败与修复细节在唯一每日记录 `docs/development/2026-09-20.md`，验收矩阵与使用说明在 `docs/plans/evidence/subtitle-implementation-status.md`。
+
+### 13.1 断点
+
+- 代码已实现到"菜单入口面 + 全链组装"完成，应用可构建；**未** commit / push / 安装 / 发布，**未**修改子模块指针。
+- 最近一次全量状态：AI 字幕单元套件全绿；整模块 `:common:testStbetaDebugUnitTest` = 353 tests / 2 failures（两条为会话开始即存在、与字幕无关的 `ScreensaverManagerTest`）；`:common:lintStbetaRelease` 与 `:smarttubetv:lintStbetaRelease` 均通过；debug 与 release 编译、debug 与 release APK（各 4 ABI）均成功；`git diff --check`、子模块与签名文件只读核对通过；证据文件中无真实凭据。
+- 当前可推进 §14/T13 本地导出与 §15 GitHub 验证/交付；§13.4 仅阻塞对应真实环境验收，不能阻塞独立任务。历史自动化记录不等于当前 GitHub 门禁通过。
+
+### 13.2 逐任务状态（相对本计划任务卡）
+
+| 任务 | 状态 | 证据落点 |
+| --- | --- | --- |
+| T00 执行现场 | 完成 | 每日记录（wrapper Gradle 7.5、JDK 17 JBR、SDK 34/30.0.3；无 sibling 子模块） |
+| T01 原文基准 | 完成 | `OriginalSubtitleNormalizer` + `OriginalSubtitleNormalizerTest`（含旧实现差分测试） |
+| T02 来源绑定 | 完成 | `SubtitleSourceBinder`/`SubtitleManifestAdapter` + 测试；Jev 批次（8 检查，7 条人工回源） |
+| T03 时间轴快照 | 完成（1 项未决） | `SubtitleTimeline*`/`SubtitleSnapshotReader` + 测试；**MIME 风险未决**（见 13.4） |
+| T04 三模式与唯一写入口 | 完成 | `SubtitleComposer`/`SubtitleManager` + 测试；Jev 批次（5 检查，4 达标） |
+| T05 生命周期与过期回写 | 完成（设备项未验） | `AiSubtitleController`/`AiSubtitleSessionBinder`/`PlaybackPresenter`/`PlaybackFragment`；Jev 批次（4 检查，3 达标） |
+| T06 调度/缓存/预算 | 主体已交付（驱动与 UI 触发已接；设备项未验） | `SubtitleBatchPlanner`/`SubtitleTranslationCache`/`SubtitleTranslationDispatcher`/`SubtitlePrefetchTicker`/`SubtitlePrefetchLoop` + 端到端测试；Jev 批次（5 检查，**全部达标**） |
+| T07 HTTP 与协议 | 主体已交付（本地 wire 级测试通过；真实调用未做） | `SubtitleEndpoint`/`SubtitleCredentials`/`SubtitleProtocolInstruction`/`SubtitleRequestBuilder`/`SubtitleResponseParser`/`SubtitleResponseHandler`/`SubtitleRetryPolicy`/`SubtitleOkHttpTranslationClient` + `SubtitleOkHttpWireTest` |
+| T08 配置与 Key | 主体已交付（JVM 层全验；平台 Keystore/备份导出未验） | `SubtitleKey*`/`MemorySubtitleKeyStore`/`PersistentSubtitleKeyStore`/`SubtitleAiPrefsStore`/`SubtitleAiSettingsController` + 测试 |
+| T09 字幕菜单接入 | 入口面完成（开关/目标语言/三模式/状态/Key 设置与清除；焦点与布局未验） | `PlayerUIController.appendAiSubtitleCategory`、`SubtitleAiMenuState`、`SubtitleTargetLanguages`、`values(-zh/-zh-rTW)/strings.xml` |
+| T10 全链联调 | 代码层完成（触发/取消/回写已接；真实来源未验） | `PlaybackPresenter`（`requestAiSubtitleTimeline`/`cancelAiSubtitleTimeline`/`applyAiEnabled`/`applyAiDisplayMode`）、`SubtitleSnapshotFetcher`/`SubtitleDataSourceInputStream` |
+| T11 构建与回归 | 历史字幕套件通过；全模块两项失败、lint 规则覆盖不完整；设备未验 | 上述门禁清单；APK 在 `smarttubetv/build/outputs/apk/stbeta/{debug,release}/` |
+| T12 最终 review 与交付 | 文档已交付；静态复查已完成 | `docs/plans/evidence/subtitle-implementation-status.md` |
+
+### 13.3 执行期间发现并修复的真实缺陷（要点）
+
+- Android 兼容性 5 处：`GCMParameterSpec`（API 19）、`StandardCharsets`（API 19，4 个文件）、`AndroidKeyStoreAccess`（API 23 未守卫）、`BooleanSupplier`（API 24）、`Comparator.comparingLong`（API 24）。全部由 `:common:lintStbetaRelease` 查出，修复后 lint 错误 15 → 0。
+- 行为问题 14 处，其中：seek / 引擎释放 / 换字幕来源三条路径未取消在途批次（已补 3 条测试）、快照 worker 线程泄漏、每结果新建 Handler、每视频 AI 开关被持久化且新视频未关内存开关、配置变更未隔离缓存且未重启、模式切换未即时重画、换轨后未重新抓取时间轴、新时间轴未重置规划器记账等。
+
+### 13.4 未决缺口（不得读作已完成）
+
+1. **设备验收**：遥控器焦点、真实多行/RTL 布局、引擎重建/旋转、残留 timer 的真实行为——本环境无设备或模拟器。
+2. **平台 Key 路径**：真实 Android Keystore 与备份导出/日志检查需仪器化运行。
+3. **来源 MIME 风险（T03）**：Jev 判为证据不足；实测直接请求 `api/timedtext` 在 3 个视频、含/不含 `fmt=vtt` 时均返回 HTTP 200 且响应体为空，这些空响应不能证明所有来源都必须登录鉴权；需从实际播放器取得有效来源及 payload。读取器按运行时格式/解码结果判断，并没有因缺验收证据而统一禁用该来源。
+4. **真实付费 API 调用**：需要用户明确授权与 Key；本会话从未执行，也未把任何真实 Key 写入仓库、日志或证据文件。
+
+**续接顺序（优化后）**：
+
+1. **先落实已授权新需求**：实施 §14/T13 与 §15；本地静态检查，GitHub 运行 Gradle 验证。仅在改动、失败或未解决疑点需要时重跑。
+2. **设备/模拟器到位后**：先做 T09/T11 的遥控器焦点、三模式多行/RTL、seek/换轨/重建/旋转和残留 timer；失败只修复对应根因并重跑受影响门禁。
+3. **已鉴权字幕来源到位后**：只做一次 T03/T10 MIME 与 payload 对照，记录 MIME、响应头、首段 payload 的脱敏证据；若不匹配，保持受控拒绝，不扩大读取器猜测。
+4. **真实 DeepSeek 授权与临时 Key 到位后**：先做一次最小 T07/T11 调用，验证真实请求/响应与脱敏；付费调用不可撤销，429 由本地模拟服务测试（在 GitHub runner 执行）验证；Key 不进入仓库、日志或证据。
+5. **三类外部证据齐全后**：更新 T03/T09/T10/T11/T12 状态和验收矩阵，再决定是否提交或发布；在此之前不把“自动化门禁通过”写成“发布质量完成”。
+
+这次 Jev `audit`（5 条 claim/evidence）只用于复查证据关系：T06/T10 支持；原批次对 T11、T03 和“继续扩展本地代码”返回不支持；复盘修正：输入是状态摘要，不能独立证明实现或决定任务优先级。它不替代测试、设备验收、签名检查或用户授权。
+
+## 14. 新增需求：电视本地一键导出（2026-09-20）
+
+状态：用户已明确要求**字幕和诊断日志都导出，分别提供按钮**；本节为待实施任务，不代表功能已实现。此项更新取代 §13 中“不新增功能”的笼统限制；已有缺陷修复与本地证据核对仍可继续。目的是让用户在电视端完成采集，通过文件管理器取走文件，无须连接 ADB。
+
+### T13 本地导出
+
+- **入口**：在现有字幕菜单的 AI 字幕区域并列提供“导出字幕”“导出诊断日志”，不藏在开发者开关后。两个按钮独立工作；未配置 Key、AI 关闭或字幕解析失败时仍能导出诊断日志。
+- **交互**：一次点击启动后台导出，完成后明确显示文件名和实际保存位置；首次需要系统存储授权时说明用途。失败显示可操作原因；不把私有目录中的不可取走文件算作成功。连续点击应防止重复任务，不覆盖已有文件，不阻塞播放或抢走播放焦点。
+- **保存位置**：优先电视公共 `Documents/SmartTube/Exports/`，文件名含时间戳以避免冲突。优先复用 `MediaStoreFile` 和现有备份存储经验；该类要求 API 29，旧版 Android 需按项目兼容范围处理公共目录权限。不能假设所有电视都有系统文件选择器，也不新增全盘管理权限来绕过限制。实际可见性须由设备文件管理器验证。
+- **字幕内容（首版默认）**：一次导出一个本地 ZIP，包含 UTF-8 原文 SRT、按相同时间轴对齐的已有译文/双语 SRT（有译文时），以及说明文件。复用当前已成功取得的时间轴和缓存快照；说明文件标明覆盖范围、缺失译文及缓存可能已淘汰的结果，不能宣称整部视频已翻译。译文缺失处采用原文回退并在说明中说明；时间轴未就绪时明确提示，不能生成伪成功空文件。
+- **费用与生命周期**：导出本身不触发 DeepSeek 调用，不为补齐字幕自动翻译全片，不重新抓取带鉴权的字幕 URL。点击时绑定当前视频/来源快照；导出过程中换视频或换轨不能混入新会话数据。不为导出取消现有缓存上限。
+- **诊断内容**：独立 UTF-8 文本报告，包含应用/Android/设备版本、来源类型与声明 MIME、快照成功/拒绝原因、时间轴条数、翻译批次及失败/取消计数、当前显示模式和有限的近期事件。来源无法解析时仍有失败证据；不要求先取得字幕时间轴。
+- **隐私边界**：诊断采用明确字段白名单，不直接打包全量 logcat、偏好设置或 HTTP 正文。不包含 Key、Authorization、Cookie、签名 URL、账号信息或字幕正文；字幕正文只进入用户主动导出的字幕文件。文件仅写本地，不自动上传或发送给第三方。
+- **阅读与复用**：`PlayerUIController` 字幕菜单、`PlaybackPresenter` 会话、`SubtitleTimeline`/`SubtitleTranslationCache`、`BackupAndRestoreHelper.exportAppMediaFolder`、`MediaStoreFile`；先核实线程和缓存快照读取方式，不建立通用导出框架。
+- **依赖与顺序**：接在现有 T09/T10 代码之后、下一轮设备验收之前。先完成格式生成/脱敏及失败路径，再接菜单和本地写入。日志分支不依赖 MIME 缺口关闭；真实 DeepSeek 验证不作为本功能前置条件。
+- **验收**：自动化覆盖 SRT 时间边界、Unicode/多行、部分译文、视频切换隔离、文件名冲突、无字幕仍可导日志及敏感值不泄露；运行受影响测试、编译和兼容性 lint。设备验证遥控器可达、一次点击导出、文件管理器可见且可复制、空间不足/权限拒绝反馈，以及导出时播放不中断。无设备时只报告自动化结果，不标为设备验收完成。
+
+下一阶段优先执行 T13，让后续真实来源与设备故障能由用户直接提供本地诊断文件。设备、有效字幕来源和真实 API 三条验收线按各自条件推进，不要求条件一次齐全；一次真实调用不能证明 429 路径，限流仍由本地模拟服务验证。
+
+## 15. GitHub 编译、签名与 prerelease 交付（最新执行约束）
+
+### 执行地点与交付顺序
+
+- 本地负责源码修改、静态检查、文档与 diff 检查；需要编译的测试、lint、debug/release 编译和 APK 组装在 GitHub Actions runner 完成。沿用 checked-in wrapper、JDK 17 构建与 release lint、stbeta variant、固定子模块版本，不上传本地生成的 APK 充当 CI 产物。
+- 实施任务包含准备 CI 与 prerelease 流程：将本任务明确选取的代码/文档/工作流提交到用户仓库 `CometDash77/SmartTube-AI`，推送并触发对应 ref 的 Actions；不得夹带无关改动、向 upstream 发布或自动推进子模块。此为后续实施交付路径，本轮文档修改不触发远程操作。
+- 若 Robolectric 在 JDK 17 无法运行，先核实兼容性，必要时在 GitHub 设置单独的兼容 JDK 测试 job；release 编译/lint 仍用 JDK 17，不能用 JDK 11 下规则加载失败但返回成功的 lint 冒充完整检查。
+- GitHub 测试/lint/构建 → APK 签名与元数据检查 → 创建指向同一已验证 commit 的 GitHub prerelease → 上传已验证 APK 与 SHA-256 清单 → 给用户下载链接和人工验收步骤。prerelease 是供验收的测试交付，不要求先通过本轮人工验收；不自动升级为正式 release。
+- 发布必须依赖所有必需检查成功。给出 commit SHA、workflow run 链接、tag、prerelease 链接、APK 文件名/ABI/包名/versionCode/versionName、文件校验值和签名证书 SHA-256。Actions artifacts 不等于 GitHub prerelease；仓库源码 ZIP 也不是安装包。
+- 自动化通过仅表示可交付测试候选；用户用该 APK 完成 T13 手动验收、开发者核对导出文件并关闭缺陷后，才标记 T13 完成。整个 AI 字幕功能的其他验收缺口独立保留。
+
+### 当前工作流缺口（本地配置审阅，未核对远端 Secrets）
+
+- `.github/workflows/CI.yml` 名为 `Build Debug APK`，实际运行 `assembleStbetaRelease`；应纠正名称，避免误认产物类型。
+- 当前自动触发仅 `master`，工作区是 `production`；实施时明确目标 ref 和触发方式，不能假设 push 会自动构建。手动 dispatch 也须确认工作流可用及实际执行 SHA。
+- 当前只有 APK artifacts 上传，没有创建 prerelease 的步骤；需增加受限的发布 job 与 `contents: write` 权限，并显式设置 prerelease，使用唯一 tag，避免覆盖旧验收包或错误指向其他提交。
+- 当前未加入单元测试 job。历史全模块测试记录有两条 ScreensaverManagerTest 失败；保留真实失败报告，确认基线，不用 continue-on-error 将整套结果伪装成通过。若限定本次必需测试范围，必须明确范围和剩余失败。
+- 当前仅根据 `SIGNING_KEY` 是否存在选择签名步骤；没有签名也会继续 release assembly，且没有 `apksigner verify`。不能将该路径直接接到 prerelease 发布。
+- 当前可选 VirusTotal 步骤会向第三方上传 APK。GitHub prerelease 授权不自动扩展为其他外发；新交付流程默认不运行该上传，除非已有明确授权覆盖。
+
+### 安装与签名易踩坑：必须在交给用户前核对
+
+| 风险 | 计划要求 |
+| --- | --- |
+| 编译成功但 release APK 未签名，无法正常安装 | GitHub 发布 job 必须先检查 SIGNING_KEY、KEY_STORE_PASSWORD、ALIAS、KEY_PASSWORD 所需配置；缺失时明确失败并阻止发布，不生成临时 Key 掩盖问题。对每个待发布 APK 执行 SDK 的 `apksigner verify --verbose --print-certs`，检查退出码和预期证书摘要。 |
+| APK 已签名，但与电视上同包名应用的签名不同，无法覆盖安装 | 核对稳定使用的签名身份；本项目 stbeta 包名为 `org.smarttube.beta`，可能与官方 beta 冲突。未取得已安装版本签名证据时，不承诺可覆盖升级。不得默认让用户卸载导致数据丢失；如需独立测试包名，先确认方案并检查相关 authority/配置，或说明备份与安装选择。 |
+| 每次 CI 换签名，后续测试包无法升级 | 使用持久维护的测试/项目签名，通过 GitHub Secrets 注入。不能使用 runner 每次生成的 debug keystore 作为长期升级身份；不读取或输出密钥内容，不把 keystore/properties 上传为 artifacts，任务结束清理临时文件。 |
+| versionName 变了但 versionCode 未变或降低 | 当前 workflow 只追加 nightly versionName，不能据此保证升级顺序。设计并记录测试版本 versionCode 策略，核对实际 APK 元数据与已安装版本；降级不能默认靠卸载解决。 |
+| ABI 不符、系统版本不符，提示解析/安装失败 | 发布说明列明 ARM64、ARMv7 等实际 APK 内容及 minSdk。Universal 的 ABI 以 APK 检查结果为准，不能只按文件名判断；指导用户按设备选择 APK，而非源码或 artifacts 外层 ZIP。 |
+| 老 APK 被当作新代码的验收包 | 唯一 tag/文件名与 commit/run 对应；清单哈希绑定实际上传资产。修复后生成新候选并重验受影响项，不覆盖旧包而保留相同验收标识。 |
+| 缺少 Secrets、token 权限或 ref 不可用 | 先检查可见的配置状态与 workflow 结果，不打印秘密；说明准确缺项。不要反复启动必然失败的 run，不用本地编译绕过 GitHub 要求。 |
+
+源码上 `smarttubetv/build.gradle` 只有在 keystore.properties 存在时才给 release 设置 signingConfig。因此“产出 APK”与“签名验证通过”、以及“能够覆盖电视上的现有应用”必须分别记录。最低 SDK 兼容的签名方案也必须由验证工具检查，不能只确认包内有证书文件。
+
+### 给 DSH 的补充指令
+
+执行 §14/T13 时一并落实本节所需 GitHub 验证与 prerelease 交付；不要本地运行 Gradle 编译/测试/打包。保留工作区现有改动，只提交任务所需内容；在用户仓库对明确 ref 执行远端检查，签名/测试门禁通过后创建 prerelease 并给出下载地址。缺签名配置时阻止发布并报告具体缺项。不要安装电视、发布正式 release 或调用真实付费 API。人工验收之前交付的是测试候选，不能宣称 T13 或整个 AI 字幕功能已经完成。

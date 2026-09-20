@@ -24,6 +24,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.models.playback.listener.Player
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.ExoMediaSourceFactory;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.errors.TrackErrorFixer;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleDataSourceInputStream;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotFetcher;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSourceBinder;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.VolumeBooster;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.ExoFormatItem;
@@ -288,6 +290,22 @@ public class ExoPlayerController implements Player.EventListener {
      */
     public SelectedSubtitleSource getSelectedSubtitleSource() {
         return mSubtitleSourceBinder.resolve(mTrackSelectorManager.getSelectedTrack(TrackSelectorManager.RENDERER_INDEX_SUBTITLE));
+    }
+
+    /** Format of the selected subtitle track, or null when subtitles are off. */
+    public Format getSelectedSubtitleFormat() {
+        MediaTrack track = mTrackSelectorManager.getSelectedTrack(TrackSelectorManager.RENDERER_INDEX_SUBTITLE);
+
+        return track != null ? track.format : null;
+    }
+
+    /**
+     * Payload factory of the AI subtitle snapshot (plan 4.1): the player's own data source, wrapped as
+     * a stream, opened for the exact URL of the bound source. Nothing is fetched here.
+     */
+    public SubtitleSnapshotFetcher.PayloadFactory createSubtitlePayloadFactory() {
+        return source -> new SubtitleDataSourceInputStream(
+                mMediaSourceFactory.createSubtitleDataSource(), source.getBaseUrl());
     }
 
     public SubtitleSourceBinder getSubtitleSourceBinder() {

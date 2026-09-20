@@ -1,0 +1,29 @@
+{
+  "task": "T05 of the SmartTube AI-subtitle plan: the AiSubtitleController owns one session and must block every stale write-back. Judge these four claims about invalidation order, idempotence, clearing and refusal before the scheduler and player wiring build on them.",
+  "checks": [
+    {
+      "id": "invalidate-before-cancel",
+      "source": "common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/AiSubtitleController.java (invalidateSession, cancelInFlight); common/src/test/.../AiSubtitleControllerTest.java (identityIsInvalidatedBeforeInFlightWorkIsCancelled)",
+      "claim": "Every session change invalidates the identity before cancelling in-flight work, so a callback racing with the cancel already fails the freshness check.",
+      "evidence": "private void invalidateSession() {\n  mSourceGeneration++;\n  mTrackGeneration++;\n  mSeekGeneration++;\n  cancelInFlight();\n}\ncancelInFlight() only calls cancel() on registered Cancellables after the generations changed.\nTest: a Cancellable whose cancel() records !controller.isCurrent(tokenBefore) produced [true] after openVideo(); passing."
+    },
+    {
+      "id": "same-source-idempotent",
+      "source": "common/src/.../AiSubtitleController.java (onSubtitleSourceSelected); common/src/test/.../AiSubtitleControllerTest.java (selectingTheSameSourceAgainKeepsTheSession)",
+      "claim": "Re-selecting the same source keeps the existing session instead of rebuilding it, so a brief audio/video track change cannot cause a duplicate translation.",
+      "evidence": "public void onSubtitleSourceSelected(SelectedSubtitleSource source) {\n  String key = keyOf(source);\n  if (key == null) { if (mActiveSourceKey != null) { invalidateSession(); mActiveSourceKey = null; } return; }\n  if (key.equals(mActiveSourceKey)) { return; }\n  invalidateSession(); mActiveSourceKey = key; mTrackGeneration++; ...\n}\nkeyOf uses generation|vssId|languageCode|baseUrl (memory only).\nTest asserts the token is still current and the display received no clear or repaint."
+    },
+    {
+      "id": "stale-refused",
+      "source": "common/src/.../AiSubtitleController.java (isCurrent, applyTranslations); tests resultAfterSeekToTheSameTextAtAnotherTimeIsIgnored, staleResultAfterAClearedFrameCannotResurrectIt, releaseCancelsAndIgnoresLaterCallbacks",
+      "claim": "A seek, subtitles-off, AI-off or release makes every earlier result unusable, and a result arriving without a selected source is refused as well.",
+      "evidence": "public boolean applyTranslations(Token token, List<String> translations) {\n  if (!isCurrent(token) || !hasActiveSession()) { return false; }\n  mDisplay.setTranslations(translations);\n  return true;\n}\nTests: seek clears the display then the pre-seek token is rejected and the frame stays cleared; subtitles-off rejects an earlier token; release rejects a token taken before release; a controller that never saw a source rejects its own current token."
+    },
+    {
+      "id": "mode-changes-pure",
+      "source": "common/src/.../AiSubtitleController.java (setDisplayMode, setAiEnabled); tests modeChangesNeverInvalidateTheSession, modeChangesWhileAiIsOffAreRememberedForTheNextSession",
+      "claim": "Changing the display mode never invalidates the session, and enabling AI later re-applies the stored mode without a new request.",
+      "evidence": "setDisplayMode(mode) { mDisplayMode = mode; mDisplay.setAiDisplayMode(mode); }   // no generation change, no cancel\nsetAiEnabled(true) { ... mDisplay.setAiDisplayMode(mDisplayMode); }\nTests assert the token stays current across a mode change, that the stored mode survives AI being off, and that disabling AI invalidates the session and clears the display."
+    }
+  ]
+}

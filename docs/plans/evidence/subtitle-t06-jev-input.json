@@ -1,0 +1,35 @@
+{
+  "task": "T06/T10 of the SmartTube AI-subtitle plan: judge the cross-state semantics of the prefetch chain (single call gate, cancellation, retry budget, duplicate dispatch, snapshot cancellation safety) before the UI and integration work builds on it.",
+  "checks": [
+    {
+      "id": "single-call-gate",
+      "source": "common/src/main/java/.../exoplayer/other/SubtitleTranslationDispatcher.java (tick, MIN_START_INTERVAL_MS); common/src/test/.../SubtitleTranslationDispatcherTest.java",
+      "claim": "The dispatcher starts at most one call at a time, and a new call requires the previous one to report back plus at least one second since the previous start.",
+      "evidence": "tick():\n  if (mInFlight != null || mTimeline == null) { return false; }\n  long nowMs = mClock.elapsedRealtimeMs();\n  if (nowMs - mLastStartMs < MIN_START_INTERVAL_MS) { return false; }\n  if (nowMs < mCooldownUntilMs) { return false; }\n  ... mInFlight = batch; mLastStartMs = nowMs; mInFlightCall = mService.translate(...)\nTests: startsAtMostOneCallAtATime (a second tick after 5 s with the first still in flight returns false and startCount stays 1); respectsTheMinimumStartInterval (999 ms refused, 1000 ms allowed)."
+    },
+    {
+      "id": "cancel-abandoned",
+      "source": "common/src/main/java/.../SubtitleTranslationDispatcher.java (cancel, handleSuccess, handleFailure); common/src/test/.../SubtitleTranslationDispatcherTest.java",
+      "claim": "A cancelled attempt keeps the slot busy until it reports back, and its late result is dropped instead of being cached or applied.",
+      "evidence": "cancel(): if (mInFlightCall != null) { mInFlightCall.cancel(); mCancelled = true; }\nhandleSuccess(): if (batch != mInFlight) return; boolean cancelled = mCancelled; release(); if (cancelled) return;\nhandleFailure(): same abandoned check before recording attempts.\nTest: cancelledCallBlocksTheSlotUntilItReportsBack asserts the cancelled call blocks the slot (startCount stays 1), and that after the cancelled call reports a late success the cache stays empty and the slot is free."
+    },
+    {
+      "id": "retry-budget",
+      "source": "common/src/main/java/.../SubtitleTranslationCache.java (recordFailure, MAX_ATTEMPTS, evict); common/src/main/java/.../SubtitleTranslationDispatcher.java (handleFailure); tests",
+      "claim": "The attempt budget is not reset by cache eviction, and once an item's budget is used up the item is marked done so no later tick resubmits it.",
+      "evidence": "Cache: failure bookkeeping lives in mAttempts/mExhausted, separate from the LRU mEntries; evict() only touches mEntries.\nDispatcher handleFailure: for each item, if (!mCache.recordFailure(id)) { mPlanner.markDone(id); } then markFinished(batch, false).\nTests: failureBudgetIsNotResetByCacheEviction (1 -> true, insert 2100 entries, 2 -> false and hasExhausted true); retryableFailureIsPlannedAgainAndThenAbandoned (after the second failure the abandoned ids never reappear in a later batch)."
+    },
+    {
+      "id": "no-duplicate-dispatch",
+      "source": "common/src/main/java/.../SubtitleBatchPlanner.java (nextBatch, markQueued, markFinished); tests",
+      "claim": "An id that is queued, in flight or already done is never planned into another batch.",
+      "evidence": "nextBatch skips an item when mPending.contains(id) || mDone.contains(id) || mOversize.contains(id).\nTests: queuedAndFinishedItemsAreNeverPlannedAgain (a queued batch's ids are absent from the next batch and a finished batch's ids cannot be replanned); successIsCachedAndItsItemsAreNotPlannedAgain at the dispatcher level."
+    },
+    {
+      "id": "snapshot-cancel-safety",
+      "source": "common/src/main/java/.../SubtitleSnapshotFetcher.java (fetch); common/src/test/.../SubtitleSnapshotFetcherTest.java",
+      "claim": "The snapshot fetch honours cancellation before opening the payload and always releases what it opened; a cancelled fetch reports CANCELLED and never a timeline.",
+      "evidence": "fetch(): checks cancelled before touching the factory, checks again after opening, passes '() -> cancelled.getAsBoolean()' to the reader, and closes the payload in finally.\nTests: aCancelledFetchDoesNotEvenOpenThePayload (the factory is never called and the status is CANCELLED); thePayloadIsAlwaysReleased (an instrumented stream records close even on success); aMissingSourceIsReportedAsNoSource; aFailingPayloadFactoryBecomesAnIoFailure."
+    }
+  ]
+}

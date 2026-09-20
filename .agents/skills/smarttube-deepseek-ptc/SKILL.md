@@ -9,6 +9,8 @@ This is a thin adapter over the shared project rules. It does not supersede the 
 
 ## Harness contract
 
+- Before continuing subtitle work, read plan sections 14–15 and `docs/development/review-handoff.md`. T13 export and GitHub prerelease delivery supersede the old local-build/no-feature-expansion handoff. Do not treat historical rounds as the current queue.
+
 - DeepSeek Harness discovers this file from `.agents/skills/*/SKILL.md`; load it by its exact skill name before a matching task.
 - Harness also injects the applicable `AGENTS.md` files. Treat those instructions as the shared engineering contract.
 - With `DSH_TOOLS_MODE=ptc`, the model sees the reserved `run_code` transport and a generated SDK section. The program written in `run_code` calls ordinary async bindings; nested calls re-enter the guarded tool pipeline and are recorded as PTC dispatch events.

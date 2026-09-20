@@ -375,6 +375,16 @@ public class ExoMediaSourceFactory {
         mSubtitleSourceBinder = subtitleSourceBinder;
     }
 
+    /**
+     * Opens a data source for the extra subtitle fetch of the AI snapshot (plan 4.1).
+     *
+     * <p>It is the same factory the player uses, so the request keeps the player's headers, cookie
+     * handling and data source choice; it opens no connection by itself.
+     */
+    public DataSource createSubtitleDataSource() {
+        return getMediaDataSourceFactory().createDataSource();
+    }
+
     public void release() {
         mMediaDataSourceFactory = null;
     }

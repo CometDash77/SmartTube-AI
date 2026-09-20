@@ -23,7 +23,7 @@ import com.liskovsoft.smartyoutubetv2.common.prefs.PlayerData;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SubtitleManager implements TextOutput, OnDataChange {
+public class SubtitleManager implements TextOutput, OnDataChange, SubtitleDisplay {
     private static final String TAG = SubtitleManager.class.getSimpleName();
     private final SubtitleView mSubtitleView;
     private final Context mContext;
@@ -31,6 +31,14 @@ public class SubtitleManager implements TextOutput, OnDataChange {
     private final AppPrefs mPrefs;
     private final PlayerData mPlayerData;
     private final OriginalSubtitleNormalizer mOriginalSubtitleNormalizer = new OriginalSubtitleNormalizer();
+    private final SubtitleComposer mSubtitleComposer = new SubtitleComposer();
+    private final CueSink mCueSink;
+    private List<CharSequence> mCurrentOriginalTexts = new ArrayList<>();
+
+    /** The only way this manager hands subtitles to a view; injectable for tests. */
+    interface CueSink {
+        void setCues(List<Cue> cues);
+    }
 
     public static class SubtitleStyle {
         public final int nameResId;
@@ -55,8 +63,13 @@ public class SubtitleManager implements TextOutput, OnDataChange {
     }
 
     public SubtitleManager(SubtitleView subtitleView) {
+        this(subtitleView, null);
+    }
+
+    SubtitleManager(SubtitleView subtitleView, CueSink cueSink) {
         mContext = subtitleView.getContext();
         mSubtitleView = subtitleView;
+        mCueSink = cueSink != null ? cueSink : subtitleView::setCues;
         mPrefs = AppPrefs.instance(mContext);
         mPlayerData = PlayerData.instance(mContext);
         mPlayerData.setOnChange(this);
@@ -68,11 +81,89 @@ public class SubtitleManager implements TextOutput, OnDataChange {
         configureSubtitleView();
     }
 
+    /**
+     * Always processes the original text first and exactly once. Translations and display-mode
+     * changes recompose this stored frame; they never run the normalization again.
+     */
     @Override
     public void onCues(List<Cue> cues) {
-        if (mSubtitleView != null) {
-            mSubtitleView.setCues(mOriginalSubtitleNormalizer.normalize(cues));
+        List<Cue> processed = mOriginalSubtitleNormalizer.normalize(cues);
+        List<CharSequence> texts = new ArrayList<>(processed.size());
+
+        for (Cue cue : processed) {
+            texts.add(cue != null && cue.text != null ? cue.text : "");
         }
+
+        mCurrentOriginalTexts = texts;
+        mSubtitleComposer.setOriginalLines(toStrings(texts));
+        renderCurrent();
+    }
+
+    /** Translations aligned to the current frame's cue slots; missing entries are null. */
+    public void setTranslations(List<String> translations) {
+        mSubtitleComposer.setTranslations(translations);
+        renderCurrent();
+    }
+
+    public void clearTranslations() {
+        mSubtitleComposer.clearTranslations();
+        renderCurrent();
+    }
+
+    public void setAiDisplayMode(int mode) {
+        mSubtitleComposer.setMode(mode);
+        renderCurrent();
+    }
+
+    public int getAiDisplayMode() {
+        return mSubtitleComposer.getMode();
+    }
+
+    /** True when source and target writing systems are the same: every mode shows one original line. */
+    public void setSourceSameAsTarget(boolean sourceSameAsTarget) {
+        mSubtitleComposer.setSourceSameAsTarget(sourceSameAsTarget);
+        renderCurrent();
+    }
+
+    public SubtitleComposer getSubtitleComposer() {
+        return mSubtitleComposer;
+    }
+
+    /**
+     * Drops the incremental original-text state. The player must call this on seek, track or video
+     * change so a line buffered for one source cannot strip text from the next one.
+     */
+    public void resetOriginalCueState() {
+        mOriginalSubtitleNormalizer.reset();
+    }
+
+    /** Recomposes the current frame without touching the original text state. */
+    public void renderCurrent() {
+        List<String> lines = mSubtitleComposer.compose();
+        List<Cue> cues = new ArrayList<>(lines.size());
+
+        for (String line : lines) {
+            cues.add(new Cue(line));
+        }
+
+        if (mCueSink != null) {
+            mCueSink.setCues(cues);
+        }
+    }
+
+    /** The original texts of the currently displayed frame, after normalization. */
+    public List<CharSequence> getCurrentOriginalTexts() {
+        return mCurrentOriginalTexts;
+    }
+
+    private static List<String> toStrings(List<CharSequence> texts) {
+        List<String> result = new ArrayList<>(texts.size());
+
+        for (CharSequence text : texts) {
+            result.add(text != null ? text.toString() : "");
+        }
+
+        return result;
     }
 
     public void show(boolean show) {

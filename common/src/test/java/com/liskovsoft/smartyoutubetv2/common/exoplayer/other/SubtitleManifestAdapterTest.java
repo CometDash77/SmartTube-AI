@@ -6,7 +6,7 @@ import com.google.android.exoplayer2.source.dash.manifest.AdaptationSet;
 import com.google.android.exoplayer2.source.dash.manifest.DashManifest;
 import com.google.android.exoplayer2.source.dash.manifest.Period;
 import com.google.android.exoplayer2.source.dash.manifest.Representation;
-import com.google.android.exoplayer2.source.dash.manifest.SingleSegmentBase;
+import com.google.android.exoplayer2.source.dash.manifest.SegmentBase.SingleSegmentBase;
 import com.google.android.exoplayer2.util.MimeTypes;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaSubtitle;
 
@@ -45,7 +45,7 @@ public class SubtitleManifestAdapterTest {
     }
 
     private static DashManifest manifest(List<Representation> representations) {
-        AdaptationSet adaptationSet = new AdaptationSet(0, C.TRACK_TYPE_TEXT, representations);
+        AdaptationSet adaptationSet = new AdaptationSet(0, C.TRACK_TYPE_TEXT, representations, null, null);
         Period period = new Period(null, 0, Collections.singletonList(adaptationSet));
 
         return new DashManifest(0, C.TIME_UNSET, 0, false, C.TIME_UNSET, C.TIME_UNSET, C.TIME_UNSET,

@@ -1,0 +1,35 @@
+{
+  "task": "T04 of the SmartTube AI-subtitle plan: one vertical loop where fake translations drive the three display modes through a single write entry to the subtitle view. Judge these claims about write entries, re-entrancy, fallback and clearing before the scheduler and UI work build on them.",
+  "checks": [
+    {
+      "id": "single-writer",
+      "source": "common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/SubtitleManager.java (onCues, setTranslations, setAiDisplayMode, renderCurrent)",
+      "claim": "SubtitleManager has exactly one path that hands cues to the view, and composed text never re-enters the original-text normalization.",
+      "evidence": "onCues:\n  List<Cue> processed = mOriginalSubtitleNormalizer.normalize(cues);\n  mCurrentOriginalTexts = texts;\n  mSubtitleComposer.setOriginalLines(toStrings(texts));\n  renderCurrent();\nsetTranslations / clearTranslations / setAiDisplayMode / setSourceSameAsTarget: only call mSubtitleComposer then renderCurrent().\nrenderCurrent():\n  List<String> lines = mSubtitleComposer.compose();\n  for (String line : lines) cues.add(new Cue(line));\n  mCueSink.setCues(cues);\nNo other call to setCues exists in the class; mCueSink is the view's setCues in production.\nTest writesTheNormalizedOriginalOnEveryCueUpdate pins that stored state is the processed text."
+    },
+    {
+      "id": "no-renormalize",
+      "source": "common/src/test/.../SubtitleManagerTest.java (translationsRecomposeWithoutRenormalizingTheOriginal); common/.../SubtitleManager.java",
+      "claim": "A translation arriving or a mode changing only recomposes the current frame and cannot change the original text state or trigger an additional original-text processing pass.",
+      "evidence": "Test:\n  mManager.onCues(cues(\"Hello\")); int writesAfterCues = mSink.writeCount();\n  mManager.setAiDisplayMode(MODE_BILINGUAL);\n  mManager.setTranslations(Arrays.asList(\"你好\"));\n  assertEquals(writesAfterCues + 2, mSink.writeCount());\n  assertEquals(Arrays.asList(\"Hello\\n你好\"), mSink.lastWrite());\n  assertEquals(Arrays.asList(\"Hello\"), texts(mManager.getCurrentOriginalTexts()));\nResult: passing. mOriginalSubtitleNormalizer is referenced only from onCues and resetOriginalCueState()."
+    },
+    {
+      "id": "empty-clears",
+      "source": "common/.../SubtitleComposer.java (compose); common/.../SubtitleManager.java (onCues); common/.../SubtitleComposerTest.java",
+      "claim": "An empty original frame clears the view even when translations for the previous frame are still cached.",
+      "evidence": "compose():\n  if (mOriginalLines.isEmpty()) { return Collections.emptyList(); }   // checked before any mode handling\n  ... mode switch below\nTests: emptyOriginalFrameClearsTheScreenInEveryMode iterates all three modes with a cached translation and asserts an empty result; SubtitleManagerTest.emptyCueUpdateClearsTheView asserts the last write is an empty list and the stored originals are empty."
+    },
+    {
+      "id": "fallback-no-placeholder",
+      "source": "common/.../SubtitleComposer.java (getTranslation, MODE_BILINGUAL / MODE_TRANSLATION_ONLY); common/.../SubtitleComposerTest.java",
+      "claim": "A missing, blank or out-of-range translation falls back to the original line, and the bilingual mode never leaves a separator or placeholder behind.",
+      "evidence": "getTranslation(slot) returns null when the slot is absent, null or blank (trim().isEmpty()).\nMODE_BILINGUAL: result.add(translation != null ? original + \"\\n\" + translation : original);\nMODE_TRANSLATION_ONLY: result.add(translation != null ? translation : original);\nTests: bilingualShowsOneOriginalWhenTheTranslationIsMissing asserts the result is exactly [\"Hello\"] and contains no newline; blankOrWhitespaceTranslationsAreTreatedAsMissing; moreTranslationsThanOriginalsAreIgnored; translationOnlyFallsBackToTheOriginalWhileWaiting."
+    },
+    {
+      "id": "mode-purity",
+      "source": "common/.../SubtitleComposer.java; common/.../SubtitleManagerTest.java (modeSwitchOnlyRecomposesTheCurrentFrame)",
+      "claim": "Switching display modes is a pure recomposition: it cannot reorder, duplicate or lose the original, and switching back yields the same text as before.",
+      "evidence": "compose() is a pure function of (mOriginalLines, mTranslations, mMode, mSourceSameAsTarget) and allocates a new list each call; setMode only stores a valid mode value (unknown values ignored).\nTest cycles TRANSLATION_ONLY -> ORIGINAL_ONLY -> BILINGUAL and asserts [你好], [Hello], [Hello\\n你好] respectively, with getOriginalLines() still [\"Hello\"]."
+    }
+  ]
+}

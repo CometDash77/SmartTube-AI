@@ -58,6 +58,10 @@ import com.liskovsoft.smartyoutubetv2.common.app.views.PlaybackView;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.controller.ExoPlayerController;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.DebugInfoManager;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.ExoPlayerInitializer;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.AiSubtitleHost;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotFetcher;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleDisplay;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleManager;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.selector.FormatItem;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.versions.renderer.CustomOverridesRenderersFactory;
@@ -97,7 +101,7 @@ import java.util.Map;
  * Plays selected video, loads playlist and related videos, and delegates playback to
  * {@link VideoPlayerGlue}.
  */
-public class PlaybackFragment extends SeekModePlaybackFragment implements PlaybackView {
+public class PlaybackFragment extends SeekModePlaybackFragment implements PlaybackView, AiSubtitleHost {
     private static final String TAG = PlaybackFragment.class.getSimpleName();
     private static final String SELECTED_VIDEO_ID = "SelectedVideoId";
     private static final int UPDATE_DELAY_MS = 100;
@@ -1361,6 +1365,28 @@ public class PlaybackFragment extends SeekModePlaybackFragment implements Playba
         if (mSubtitleManager != null) {
             mSubtitleManager.show(show);
         }
+    }
+
+    @Override
+    public SubtitleDisplay getSubtitleDisplay() {
+        createSubtitleManager();
+
+        return mSubtitleManager;
+    }
+
+    @Override
+    public SelectedSubtitleSource getSelectedSubtitleSource() {
+        return mExoPlayerController != null ? mExoPlayerController.getSelectedSubtitleSource() : null;
+    }
+
+    @Override
+    public com.google.android.exoplayer2.Format getSelectedSubtitleFormat() {
+        return mExoPlayerController != null ? mExoPlayerController.getSelectedSubtitleFormat() : null;
+    }
+
+    @Override
+    public SubtitleSnapshotFetcher.PayloadFactory createSubtitlePayloadFactory() {
+        return mExoPlayerController != null ? mExoPlayerController.createSubtitlePayloadFactory() : null;
     }
 
     public boolean isDebugInfoShown() {

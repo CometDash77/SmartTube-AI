@@ -1,0 +1,35 @@
+{
+  "task": "T03 of the SmartTube AI-subtitle plan: build an immutable native subtitle timeline for background prefetch. Judge each claim/evidence pair for the snapshot reader and timeline builder before the scheduler and UI work that depends on them.",
+  "checks": [
+    {
+      "id": "time-base",
+      "source": "common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/SubtitleSnapshotReader.java (decode: timeUs=0, subsampleOffsetUs=format.subsampleOffsetUs); exoplayer-amzn-2.10.6/library/core/src/main/java/com/google/android/exoplayer2/text/TextRenderer.java:238-247; .../text/SubtitleOutputBuffer.java:40-65",
+      "claim": "Decoding the whole file in one input buffer with timeUs = 0 and subsampleOffsetUs = format.subsampleOffsetUs gives event times on the media timeline, and no offset is applied twice.",
+      "evidence": "TextRenderer:\n  nextInputBuffer.subsampleOffsetUs = formatHolder.format.subsampleOffsetUs;\n  nextInputBuffer.flip();\n  decoder.queueInputBuffer(nextInputBuffer);\nSubtitleOutputBuffer.setContent(timeUs, subtitle, subsampleOffsetUs):\n  this.subsampleOffsetUs = subsampleOffsetUs == Format.OFFSET_SAMPLE_RELATIVE ? this.timeUs : subsampleOffsetUs;\n  getEventTime(index) { return subtitle.getEventTime(index) + subsampleOffsetUs; }\n  getCues(timeUs) { return subtitle.getCues(timeUs - subsampleOffsetUs); }\nFormat.OFFSET_SAMPLE_RELATIVE = 9223372036854775807; subtitle formats from this app keep that default.\nReader sets input.timeUs = 0, so the output offset resolves to 0 and event times are file-relative = media time."
+    },
+    {
+      "id": "async-decoder",
+      "source": "exoplayer-amzn-2.10.6/library/core/src/main/java/com/google/android/exoplayer2/decoder/SimpleDecoder.java:100-119,187-215; common/.../SubtitleSnapshotReader.java (decode polling loop)",
+      "claim": "The reader must poll with a deadline instead of stopping at the first null dequeueOutputBuffer, because this checkout decodes on a background thread.",
+      "evidence": "SimpleDecoder:\n  public final O dequeueOutputBuffer() { synchronized (lock) { if (queuedOutputBuffers.isEmpty()) { return null; } ... } }\n  private void run() { while (decode()) {} }\n  decode() waits on lock until canDecodeBuffer() and then decodes off the caller's thread.\nMeasured before the fix: with a correct VTT payload queued plus an end-of-stream buffer, eight consecutive dequeueOutputBuffer() calls returned null and the reader produced a status OK snapshot with zero events."
+    },
+    {
+      "id": "duplicate-event-times",
+      "source": "measured decoder output (SubtitleDecoderProbeTest, temporary, deleted after the probe); exoplayer .../text/TextRenderer.java:179-216",
+      "claim": "One display frame per distinct event time is required because the VTT decoder reports several events at the same microsecond, and treating them as separate frames both creates zero-length frames and double-applies the incremental text rule.",
+      "evidence": "Probe output for 'WEBVTT 0-2s Hello, 2-4s World':\n  buffer timeUs=0 eos=false events=4 @0=[Hello] @2000000=[World] @2000000=[World] @4000000=\nTextRenderer advances while (subtitleNextEventTimeUs <= positionUs) { nextSubtitleEventIndex++; } and then calls getCues(positionUs), so playback shows one content change per instant.\nBefore collapsing, OriginalSubtitleNormalizer consumed the duplicated [World] event and stripped the repeated text, so the snapshot frame showed an empty string while playback showed 'World'."
+    },
+    {
+      "id": "empty-cue-clears",
+      "source": "common/.../SubtitleTimelineBuilder.java (frames are built for every event, including an event with no cues); common/.../OriginalSubtitleNormalizer.java",
+      "claim": "An event whose cue list is empty is a real clearing boundary and must be kept as an empty frame, while a cue whose text is empty is a text frame.",
+      "evidence": "Builder: for each event it creates a SubtitleFrame even when the cue list is empty; SubtitleFrame.isEmpty() reports items.isEmpty().\nReader test asserts: event(1_000_000) with no cues yields timeline.frameAt(1_000_000).isEmpty() == true, while a one-cue event with text \"\" yields one item with empty text.\nOriginalSubtitleNormalizer.normalize(<no cues>) returns an empty list without touching its buffer."
+    },
+    {
+      "id": "mime-mapping",
+      "source": "exoplayer-amzn-2.10.6/library/core/src/main/java/com/google/android/exoplayer2/text/SubtitleDecoderFactory.java:72-92; .../text/webvtt/Mp4WebvttDecoder.java:30-60; .../text/webvtt/WebvttDecoder.java:31; MediaServiceCore/youtubeapi/.../CaptionTrack.java:95-96",
+      "claim": "The subtitle MIME type taken from the source metadata selects a decoder that can parse the payload the player will actually download.",
+      "evidence": "DEFAULT.createDecoder maps application/x-mp4-vtt to Mp4WebvttDecoder, whose parser reads MP4 boxes (TYPE_vttc) instead of raw text.\nCaptionTrack.getMimeType() returns sFormat.mimeType, i.e. whatever the YouTube response declares.\nNo payload from a real source has been captured in this workspace, so it is unknown whether a YouTube timedtext response declared as application/x-mp4-vtt is really MP4-boxed or plain WEBVTT text."
+    }
+  ]
+}
