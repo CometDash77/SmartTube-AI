@@ -47,11 +47,11 @@ jobs:
       - name: Required test scope (exoplayer.other)
         run: ./gradlew :common:testStbetaDebugUnitTest --tests "com.liskovsoft.smartyoutubetv2.common.exoplayer.other.*"
 
-      # Informational only: the complete module task still carries two pre-existing
-      # ScreensaverManagerTest failures that predate this work, so it must never be read as "the
-      # module is green". The required gate is the step above.
-      - name: Full common module suite (informational baseline, known failures)
-        continue-on-error: true
+      # The complete module task is a gate as well: the two historical ScreensaverManagerTest failures
+      # were fixed on 2026-09-20 by driving the real pause+stop lifecycle (the production suspend lives
+      # on onStop), so the module is green and must not be hidden behind continue-on-error. Its result
+      # count is printed only when something fails; a green run reports no count.
+      - name: Full common module suite
         run: ./gradlew :common:testStbetaDebugUnitTest
 
       - name: Upload test reports

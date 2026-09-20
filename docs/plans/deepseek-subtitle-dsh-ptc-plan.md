@@ -701,7 +701,7 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 
 ## 17. T13 验收后的下一阶段实现计划（2026-09-20）
 
-状态：**ready-for-agent（计划已更新，以下任务尚未实施）**。本轮只修改计划与开发记录。采用 Matt Skills Curated `to-spec` 综合既有需求，不新增采访、Issue 发布或设计审批。核对基线：本地 `production` / `66e7acb9`；开始实施时重新确认实际 HEAD 和已有改动。
+状态：**已开始实施（见 §19 执行状态）**。本节与 §18 是任务定义；实际完成度以 §19 和证据文档为准，不要按本节标题推断“已全部完成”。采用 Matt Skills Curated `to-spec` 综合既有需求，不新增采访、Issue 发布或设计审批。核对基线：本地 `production` / `66e7acb9`；开始实施时重新确认实际 HEAD 和已有改动。
 
 ### 17.1 当前事实与优先级
 
@@ -849,3 +849,29 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 | 用户可取得与使用 | 最终 APK/校验清单/说明/有效下载地址，实际发布状态明确 | N9 |
 
 核心项不能由 agent 自行豁免。真实 Key、设备、签名配置或最后发布授权缺失时只挂起相应出口并记录准确缺项；继续所有不依赖它们的工作。最终停止条件是上述成品清单完成，而不是 N1–N4 完成、测试通过或生成一次 prerelease。
+
+## 19. 执行状态：N1–N9（2026-09-20 后续会话，Asia/Hong_Kong）
+
+本节只记录**已完成且已验证**与**明确未完成**的事实；历史计划文本（§1–§18）保持不变。
+
+### 19.1 已完成并已由 CI 验证
+
+- **N1 请求身份隔离与同源去重（完成）**：新增 `SubtitleTimelineScheduler`（不可变请求身份：媒体代次 + 源身份 + 内容定位符，每次尝试持有独立取消标志）与 `SubtitleTimelineCoordinator`（可注入 worker/main 线程的确定性编排单元）。语义：同源在飞/已完成即复用；真实换源/换视频推进媒体代次并失效旧请求；旧请求的晚到成功、晚到失败与 finally 都不能安装时间轴、覆盖当前诊断状态或清空新请求的在飞占位；失败终态释放占位，只有显式事件才重试。同一内容在重建后的新代次下**重新归属已解码时间轴**，而不是再下载解码一次（设备日志中同一视频三次抓取的主要来源）。`PlaybackPresenter` 改为通过协调器请求：seek 不再取消在飞抓取、换轨不再无条件取消重建、新视频/换源推进代次；配置变更不再重抓原文时间轴，改为重新安装既有时间轴以重启预取。回归：`SubtitleTimelineSchedulerTest`（8）+ `SubtitleTimelineCoordinatorTest`（9）。
+- **N2 Key 配置链路（完成）**：Key 一律经活动 `SubtitleAiSettingsController.saveKey` 写入**同一个** store（修掉 UI 自建 store 与运行中服务读不同实例、API 17–22 内存 store 下 Key 永不生效的缺陷）；端点 origin 变化自动清除已存 Key；新增 `CredentialChangeListener`，Key 变化**不**使缓存失效（Key 不在配置命名空间内），只解除鉴权停机并在 AI 开启且已有 Key 时立即恢复预取。新增 `SubtitleTranslationService.isAuthorizationStopped()`：401/403/402 的 `STOP_SESSION` 被真正落实（停止预取循环 + 菜单 `AUTH_FAILED` 状态），不再盲目重试。回归：`SubtitleAiSettingsControllerTest`（+5）、`SubtitleTranslationServiceTest`（+2）、`SubtitleAiMenuStateTest`（+2）。
+- **N5 完整设置与连接测试（菜单部分完成）**：字幕菜单 AI 区补齐服务地址、模型、翻译风格（含恢复默认）、Key 设置/清除与**手动连接测试**；新增 `SubtitleConnectionTest`（固定两条合成文本、无上下文、绝不发送正在观看的字幕，结果分类为 OK/NOT_CONFIGURED/AUTH_FAILED/NO_BALANCE/BAD_REQUEST/RATE_LIMITED/SERVER_ERROR/NETWORK/PROTOCOL 并本地化提示）；三套字符串各新增 21 条。回归：`SubtitleConnectionTestTest`（9）。
+- **N4 版本号与升级策略（完成）**：`versionCode` 定为**下一个稳定版预留号**（2444），CI 对开发/验收候选统一取 `-1`（2443），因此候选可覆盖任何已发布版本、稳定版可覆盖候选，且 nightly 不消耗未来稳定号。
+- **N8 稳定签名 RC 通道（CI 完成，产物受阻）**：`workflow_dispatch` 新增 `release_mode`；该模式下缺 4 个签名 Secrets 会**直接失败**，绝不回退 debug；有 Secrets 时产出 `versionName` 不带后缀、`versionCode` 为预留号的 release 候选，验收通过后可用同一 tag 提升为正式 release。**当前仓库没有任何 Secrets，因此还产不出项目签名 RC（见 19.3）**。
+- **N7 基线质量（部分完成）**：两条 `ScreensaverManagerTest` 基线失败的根因已查清——测试仍在 `onPause` 后断言唤醒锁释放，而生产代码自 `a7d6d06a` 起有意把 `suspend()` 放在 `onStop`（避免持续调光闪烁）；已按真实 `pause+stop` 生命周期修正用例并同步澄清 `MotherActivity` 注释，**未改生产行为**。lint registry 的 `WorkManagerIssueRegistry` 报错只出现在本机 JDK 11；CI（JDK 17）的 `lintStbetaRelease` 两模块日志中**不存在**该错误，故远程 lint 门禁覆盖完整。
+
+### 19.2 验证方式
+
+- 编译、Gradle 测试、lint、APK 组装与 `apksigner` 校验全部在 GitHub Actions 执行（本地不做 Gradle 编译/打包）；必需测试范围为 `com.liskovsoft.smartyoutubetv2.common.exoplayer.other.*`。
+- 每次推送的 run、commit、tag、SHA-256 与证书摘要记录在 `docs/plans/evidence/subtitle-ai-rc-delivery-2026-09-20.md`；实现矩阵更新在 `docs/plans/evidence/subtitle-implementation-status.md`。
+
+### 19.3 未完成（不得读作已通过）
+
+1. **项目签名 RC 与升级验证（N8）**：仓库无 Secrets，当前只有 debug 回退候选；稳定签名身份、同签名覆盖升级与全新安装证据都还没有。
+2. **N6 真实播放链与真实服务联调**：没有真实 Key 的付费调用，也没有来源矩阵（手工字幕/ASR/DASH/SABR/合并源）的设备记录。
+3. **N3/N4 设备侧**：译文/双语/部分失败/中断的导出形态、权限拒绝、空间不足、任务冲突、遥控器焦点与导出期间播放连续性只有代码与 fake 证据。
+4. **N7 设备/安全侧**：真实 Android Keystore、no-backup、应用备份与系统迁移、API 17–22 内存 Key 分支，以及 30 分钟长播/多 seek 的资源与性能记录均缺失。
+5. **N9 最终验收**：本轮只交付“可验收候选 + 使用/验收文档”，成品状态取决于第 7 节清单的设备结果与第 8 节的签名前提。

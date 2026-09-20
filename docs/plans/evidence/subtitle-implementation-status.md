@@ -131,3 +131,29 @@ Explicitly **not** verified:
 6. **Lifecycle.** Seek, engine release and a subtitle-source change abandon any in-flight translation
    (its late answer is neither cached nor shown); turning AI off restores the original immediately;
    closing subtitles ends the session but keeps the per-video AI intent for when they are shown again.
+
+---
+
+## N1–N9 session update (2026-09-20, later session)
+
+This section records what the N1/N2/N5/N7 work of the same day actually verified. Everything above stays
+as the historical record of the earlier stage.
+
+### New automated evidence
+
+| Area | Proof | Status |
+| --- | --- | --- |
+| Request identity and same-source dedup (N1) | `SubtitleTimelineSchedulerTest` (8) + `SubtitleTimelineCoordinatorTest` (9), run inside the required CI scope on JDK 11: the same source fetches once; a superseded attempt's late success **and** late failure install nothing, overwrite no status and free no newer slot; release and subtitles-off abandon the attempt; an explicit later event retries after a failure; the same payload in a new manifest generation is re-attributed instead of re-downloaded; the production fetch path (`systemFetcher`) installs a decoded timeline | automated **verified** |
+| Key chain and auth stop (N2) | `SubtitleAiSettingsControllerTest` (+5: save through the active store, blank refused, origin change forgets the key, same origin keeps it, clear notifies both listeners), `SubtitleTranslationServiceTest` (+2: 401/403/402 stops until a success, an unrelated failure does not), `SubtitleAiMenuStateTest` (+2: the AUTH_FAILED state) | automated **verified** |
+| Settings menu and connection test (N5) | `SubtitleConnectionTestTest` (9: OK, not configured, an unusable address refuses before any call, per-status classification, transport failure, damaged answer, the synthetic batch carries no watched subtitle text, the attempt is cancellable) | automated **verified** (class logic); real service **not verified** |
+| Baseline quality (N7) | The two pre-existing `ScreensaverManagerTest` failures were traced to a stale expectation: the test asserted release after `onPause`, while `MotherActivity` deliberately suspends on `onStop` (`a7d6d06a`, to avoid dim flicker). The cases now drive the real `pause+stop` sequence and the misleading comment was corrected; production behaviour unchanged. The CI lint log (JDK 17) contains **no** `WorkManagerIssueRegistry` error, so remote lint covers the full registry — the local JDK 11 caveat above does not apply to CI | automated **verified** |
+| Version and upgrade strategy (N4) | `versionCode` 2444 is reserved for the next stable release; CI derives every candidate as `versionCode - 1` (2443), so a candidate installs over anything released, the stable upgrades over the candidate, and nightly candidates never consume future stable numbers | policy **implemented**; real upgrade evidence **not verified** |
+| Stable-signed RC path (N8) | `.github/workflows/CI.yml` gained `workflow_dispatch.release_mode`: with the four secrets it assembles `stbetaRelease` at the reserved versionCode with the plain versionName and publishes a unique prerelease; without them it fails before building and publishes nothing (no debug fallback) | path **implemented**; **blocked**: the repository has no secrets, so no project-signed RC exists yet |
+
+### What this session did **not** verify
+
+1. No project-signed RC: `gh secret list` is empty (SIGNING_KEY / KEY_STORE_PASSWORD / ALIAS / KEY_PASSWORD missing).
+2. No device check of the translated/bilingual/partial/failed exports, permission refusal, out-of-space,
+   remote focus or playback continuity during an export.
+3. No real DeepSeek call, no real Android Keystore / backup-export check and no API 17–22 device evidence.
+4. The new settings entries and the connection test were not exercised on a TV.
