@@ -1,0 +1,141 @@
+{
+  "policy": "smarttube-triage-v1",
+  "mode": "audit",
+  "status": "judged",
+  "calls": 1,
+  "input_sha256": "f88956671c40a68dcfe6167569dda225cb4aabb0612669becada3eaab1fdf526",
+  "model": "typesafe/jev-1.13-20260917",
+  "usage": {
+    "input_tokens": 6875,
+    "output_tokens": 371,
+    "cost": 0.00028875
+  },
+  "rows": [
+    {
+      "id": "readiness-not-notselected",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "astra_review",
+      "answer": {
+        "type": "choice",
+        "choice": "supports",
+        "probabilities": {
+          "supports": 0.84,
+          "insufficient": 0.09,
+          "contradicts": 0.07
+        },
+        "confidence": 0.77
+      }
+    },
+    {
+      "id": "status-belongs-to-selection",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "supported_in_supplied_evidence",
+      "answer": {
+        "type": "choice",
+        "choice": "supports",
+        "probabilities": {
+          "supports": 0.96,
+          "insufficient": 0.03,
+          "contradicts": 0.01
+        },
+        "confidence": 0.95
+      }
+    },
+    {
+      "id": "skips-exclude-dedup",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "supported_in_supplied_evidence",
+      "answer": {
+        "type": "choice",
+        "choice": "supports",
+        "probabilities": {
+          "supports": 0.97,
+          "insufficient": 0.02,
+          "contradicts": 0.01
+        },
+        "confidence": 0.97
+      }
+    },
+    {
+      "id": "installs-only-current-accepted",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "supported_in_supplied_evidence",
+      "answer": {
+        "type": "choice",
+        "choice": "supports",
+        "probabilities": {
+          "supports": 0.96,
+          "insufficient": 0.03,
+          "contradicts": 0.01
+        },
+        "confidence": 0.95
+      }
+    },
+    {
+      "id": "reason-from-click-time-snapshot",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "astra_review",
+      "answer": {
+        "type": "choice",
+        "choice": "supports",
+        "probabilities": {
+          "supports": 0.55,
+          "insufficient": 0.44,
+          "contradicts": 0.01
+        },
+        "confidence": 0.33
+      }
+    },
+    {
+      "id": "ai-off-has-own-label",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "supported_in_supplied_evidence",
+      "answer": {
+        "type": "choice",
+        "choice": "supports",
+        "probabilities": {
+          "supports": 0.95,
+          "insufficient": 0.04,
+          "contradicts": 0.01
+        },
+        "confidence": 0.93
+      }
+    },
+    {
+      "id": "key-save-feedback-honest",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "astra_review",
+      "answer": {
+        "type": "choice",
+        "choice": "insufficient",
+        "probabilities": {
+          "supports": 0.15,
+          "insufficient": 0.78,
+          "contradicts": 0.07
+        },
+        "confidence": 0.68
+      }
+    },
+    {
+      "id": "visibility-events-on-change-only",
+      "source": "commit 33c674b2 local working tree; line locators are inside the evidence",
+      "action": "astra_review",
+      "answer": {
+        "type": "choice",
+        "choice": "supports",
+        "probabilities": {
+          "supports": 0.84,
+          "insufficient": 0.16,
+          "contradicts": 0
+        },
+        "confidence": 0.76
+      }
+    }
+  ],
+  "elapsed_ms": 1079.98,
+  "not_checked": [
+    "evidence authenticity/freshness",
+    "code correctness",
+    "overall task completion"
+  ]
+}
