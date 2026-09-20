@@ -225,7 +225,9 @@ seek 保留同源摘要和可复用译文、清连贯历史；seek 打断尚未�
 
 目的：让已实现并接线的功能**今天就可在电视上验收**，而不是等四个功能全部完成。规则断句（K4/K5）**不在本轮范围**，见下方“明确不在范围”。
 
-**验收对象**：本轮 GitHub Actions 在同一 SHA 上产出的 debug 回退候选。tag / SHA / APK 哈希 / 运行编号见当天[进度记录](../../development/2026-09-20.md)与[实施状态](evidence/kiss-implementation-status-2026-09-20.md)。
+**验收对象**：prerelease **`stbeta-32.53-nightly-25-25-debug`**，targetCommitish `6c70e37093f0074d624eab6c1a1e9b234d548281`，GitHub run [35510576265](https://github.com/CometDash77/SmartTube-AI/actions/runs/35510576265)（conclusion success，67 suites / 529 tests / 0 failures）。资产：`SmartTube_beta_32.53-nightly-25_{universal,arm64-v8a,armeabi-v7a,x86}.apk` + `SHA256SUMS.txt`；universal 45,130,107 B，SHA-256 `a77af5fc941dcc11cd7c0075a8f1d52aa764c0610a569d2f247165d2d6e9fe43`。版本 `versionCode=2443`、`versionName=32.53-nightly-25`。完整核对见当天[进度记录](../../development/2026-09-20.md)，逐项状态见[实施状态](evidence/kiss-implementation-status-2026-09-20.md)。
+
+> **安装前必读（覆盖升级不成立）**：本候选是 **debug 回退签名**（仓库仍无 4 个签名 Secrets），本机独立复核的证书为 `C=US, O=Android, CN=Android Debug` / SHA-256 `9fb71b8a5508f17319acb273846796fc016c21965137534b6fcde3f3cc75cdd`，与 nightly-24 的证书不同。Android 会**拒绝覆盖安装**，需要先卸载旧 nightly —— 这会清空应用数据（偏好与已配置的 Key，安装后需重新输入）。这与[使用说明 §2](../../ai-subtitle-user-guide.md)一致，不是本轮缺陷；要避免清数据必须等仓库配置签名 Secrets 后产出项目签名 RC。
 
 **按使用说明执行**（[§7 验收清单](../../ai-subtitle-user-guide.md)、[§4.5 新增功能](../../ai-subtitle-user-guide.md)）：
 

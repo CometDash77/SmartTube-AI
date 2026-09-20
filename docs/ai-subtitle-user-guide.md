@@ -3,7 +3,9 @@
 适用版本：SmartTube stbeta 32.53（本仓库 `production` 分支的 AI 字幕功能）
 日期：2026-09-20（Asia/Hong_Kong）· 包名：`org.smarttube.beta` · minSdk 17 / targetSdk 34
 
-> **当前候选 nightly-24，设备验收待完成。** nightly-22 日志已证实 Key 当前会话可用并导出 875 条原文，但翻译失败。nightly-24 修复了真实请求缺 model/messages、官方响应未解包、配置入口反馈与 HTTP 诊断等问题，456 项测试及完整 CI 通过。见[当前状态](plans/subtitle-current-status.md)与[第四轮报告](plans/evidence/subtitle-round4-service-review.md)。以下使用步骤不等于已完成电视验收。
+> **当前验收候选 nightly-25（`stbeta-32.53-nightly-25-25-debug`，SHA `6c70e370`，run 35510576265）**：修复复核的四项生产接线缺口，并加入智能上下文三档、一次性视频摘要、强制重翻与可撤销的加载通知；**规则断句尚未实施（开关无行为）**。CI 67 suites / 529 tests / 0 failures，双模块 release lint、组装与 `apksigner` 校验通过。**它是 debug 回退签名，证书与 nightly-24 不同：覆盖安装会被拒绝，需先卸载旧包，会清空应用数据与 Key。** 本轮验收范围见[计划 §9](plans/kiss-subtitle-features-implementation-plan.md)与本文 §4.5/§7。
+>
+> 历史：**nightly-24（上一轮已确认可用工作流）**。nightly-22 日志已证实 Key 当前会话可用并导出 875 条原文，但翻译失败。nightly-24 修复了真实请求缺 model/messages、官方响应未解包、配置入口反馈与 HTTP 诊断等问题，456 项测试及完整 CI 通过。见[当前状态](plans/subtitle-current-status.md)与[第四轮报告](plans/evidence/subtitle-round4-service-review.md)。以下使用步骤不等于已完成电视验收。
 
 本文档面向**安装与验收这个 APK 的人**。第 1–6 节是使用说明，第 7 节是逐条验收清单，
 第 8 节列出交付物与“同一 APK 直接发布 stable”的做法，第 9 节是明确**未完成**的缺项。

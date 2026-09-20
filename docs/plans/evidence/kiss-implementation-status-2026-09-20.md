@@ -2,7 +2,7 @@
 
 日期：2026-09-20，Asia/Hong_Kong。分支 `production`，起点 `91982d5e` 加前一会话未提交的 K0–K2 工作树。本文件是**实施状态与证据矩阵**，不是进度日志；当天进度见 [2026-09-20 记录](../../development/2026-09-20.md)，需求与任务卡见 [K0–K7 增量计划](../kiss-subtitle-features-implementation-plan.md)，审查发现见[复核与骨架](../kiss-agent-review-and-skeleton-2026-09-20.md)。
 
-**一句话状态：** 复核发现的四项 K1/K2 接线缺口已修复并有生产接缝回归；智能上下文（三档 + 一次性摘要）已实现并接入生产请求；强制重翻已实现；**规则断句的算法与显示/导出链路尚未实施**（设置项存在但无行为）。未 commit/push、未触发 GitHub Actions、未签名或安装设备、未做真实付费调用。
+**一句话状态：** 复核发现的四项 K1/K2 接线缺口已修复并有生产接缝回归；智能上下文（三档 + 一次性摘要）已实现并接入生产请求；强制重翻已实现；**规则断句的算法与显示/导出链路尚未实施**（设置项存在但无行为）。代码已提交（`6c70e370`）并推送，GitHub Actions run 35510576265 通过并发布验收候选 **`stbeta-32.53-nightly-25-25-debug`**（debug 回退签名）；仍未安装设备、未做真实付费调用、未发布正式 release。
 
 ## 1. 本文件对应的改动范围
 
@@ -42,9 +42,14 @@
 | `:common:compileStbetaDebugJavaWithJavac` | BUILD SUCCESSFUL, exit 0 |
 | `:common:lintStbetaRelease :smarttubetv:compileStbetaDebugJavaWithJavac` | BUILD SUCCESSFUL, exit 0（lint 日志仍出现本机 JDK 11 的 `WorkManagerIssueRegistry` class-file 61 提示，属既有环境现象） |
 | `:smarttubetv:lintStbetaRelease` | **BUILD SUCCESSFUL, exit 0**（1 m 8 s） |
+| GitHub Actions run 35510576265（JDK 11 测试 job） | **success**；下载 `unit-test-reports` 解析 XML：**67 suites / 529 tests / 0 failures / 0 errors / 0 skipped**（与本机整模块结果一致） |
+| GitHub Actions run 35510576265（JDK 17 publish job） | **success**；双模块 release lint、`:smarttubetv:assembleStbetaDebug`、`apksigner verify`、prerelease 发布与 artifact 上传全部通过；VirusTotal 按设计跳过 |
+| 候选独立复核（本机 SDK build-tools 37.0.0 + JBR 17） | universal APK 45,130,107 B，SHA-256 `a77af5fc941dcc11cd7c0075a8f1d52aa764c0610a569d2f247165d2d6e9fe43` 与 `SHA256SUMS.txt` 一致；`apksigner verify` = `Verifies`（v1/v2），证书 DN `C=US, O=Android, CN=Android Debug` / SHA-256 `9fb71b8a…`（debug 回退）；`aapt` = versionCode 2443 / versionName 32.53-nightly-25 / minSdk 17 / targetSdk 34 / universal 含 arm64-v8a+armeabi-v7a |
 | `git diff --check` / `python -B scripts/check-development-docs.py` | 见当天记录最终检查 |
 
-**未执行：** GitHub Actions 的必需范围/整模块测试、双模块 release lint（远程 JDK 17）、APK 组装与 `apksigner` 校验、prerelease 发布、设备安装与电视验收、真实 Key/付费调用、真实 Android Keystore 与备份导出、API 17–22 设备。**本轮没有 push 授权，因此没有 CI 证据，也不把本地结果当作 CI 或发布证据。**
+**已执行（远端，同一 SHA `6c70e370`）：** GitHub Actions 必需范围与整模块测试、双模块 release lint（JDK 17）、APK 组装、`apksigner` 校验与 prerelease 发布，见上表。
+
+**仍未执行：** 设备安装与电视验收、真实 Key/付费调用、真实 Android Keystore 与备份导出、API 17–22 设备、项目签名 RC（缺 4 个 Secrets）。远端门禁通过只说明代码门禁，不替代电视验收；本轮候选是 debug 回退签名，**覆盖安装 nightly-24 会被拒绝，需先卸载（清空应用数据与 Key）**。
 
 ## 5. 顺序差异与理由
 
@@ -58,8 +63,8 @@
 ## 6. 下一步（按优先级）
 
 1. **K4/K5**：`SubtitleRuleSegmenter`（保守 native 边界合并、稳定来源映射、局部回退与 LONG_UNSPLIT 计数）、`SubtitleSegmentTimeline`（`segmentId/memberItemIds/startUs/endUs/sourceText/ruleVersion`）、planner 选择 raw/derived、单显示入口的原子替换、边界驱动显示更新、导出增加 `segmented-*.srt`。
-2. **GitHub-only 门禁**：获得 push 授权后，在同一最终 SHA 运行必需测试范围、整模块测试、双模块 release lint、APK 组装与 `apksigner` 校验，并发布 debug 回退候选。
-3. **设备验收**：重翻入口的焦点/回执、通知遮挡、上下文与断句的实际观感；真实 Key 的最小付费调用另行授权。
+2. ~~**GitHub-only 门禁**~~：**已完成**（run 35510576265，SHA `6c70e370`，候选 `stbeta-32.53-nightly-25-25-debug`）。
+3. **设备验收（进行中）**：按[计划 §9](../kiss-subtitle-features-implementation-plan.md)与使用说明 §7/§4.5 在电视上验收已实现功能；重翻入口的焦点/回执、通知遮挡与上下文档位的实际观感；真实 Key 的最小付费调用另行授权。**安装前注意 debug 回退签名需先卸载旧包。**
 4. **独立缺口**：项目签名 RC（缺 4 个 Secrets）、API 17–22 设备、真实 Keystore/备份导出、导出译文形态。
 
 ## 7. 隐私与边界
