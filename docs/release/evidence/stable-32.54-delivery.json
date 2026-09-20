@@ -1,0 +1,28 @@
+{
+  "release_url": "https://github.com/CometDash77/SmartTube-AI/releases/tag/stbeta-32.54-rc29",
+  "title": "SmartTube AI 32.54 Stable",
+  "tag": "stbeta-32.54-rc29",
+  "prerelease": false,
+  "build_commit": "933bb04c8caca155f9c5be8ee1dd013bf1f58667",
+  "build_run": 35518525613,
+  "upstream_sync_run": 35519086947,
+  "upstream_commit": "4a786a8f1e0ccd134718d13097f3ac3d4bc064e0",
+  "unit_tests": {
+    "suites": 68,
+    "tests": 558,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "release_contract_tests": 8,
+  "certificate_sha256": "383ca57b99e05205fa0ff34374a42d1801926e5f75e4b5086b8fe78b4f84d5c0",
+  "checksums": {
+    "SmartTube_beta_32.54_arm64-v8a.apk": "d0d5d3a0be015fd097701366d71835caa1d8df7943d09908a2f5f25a80b8b220",
+    "SmartTube_beta_32.54_armeabi-v7a.apk": "c4a7cde55775707003d82b5d32d96c8d0fd70789d55c6ae3ea62e3cedac14928",
+    "SmartTube_beta_32.54_universal.apk": "814a31bcdbab22e7f3680257c408571c027c0c80963c1b24480782423a9cd07b",
+    "SmartTube_beta_32.54_x86.apk": "32e0dad13f0eb6bf29700f6de847c4c8c4bf0b69397166341e870869890a608a",
+    "smarttube-ai.json": "16b87cc84cf98b7adc721a808867a175445b5d58b4c5a692710fadc74db54716"
+  },
+  "public_feed_verified": true,
+  "device_verification_this_session": false
+}
