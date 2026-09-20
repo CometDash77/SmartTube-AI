@@ -262,9 +262,11 @@ public class PlayerUIController extends BasePlayerController {
     }
 
     /**
-     * The AI area of the existing subtitle menu (plan section 5): one per-video switch and the status
-     * line, both built with the same option helpers the rest of the dialog uses. Detailed settings
-     * (target language, display mode, key) belong to the follow-up entries of this area.
+     * The AI area of the existing subtitle menu (plan sections 5, 6.3 and 18.3): the per-video switch,
+     * the display mode, the target language, the service configuration (address, model, translation
+     * style), the credential entries with the manual connection test, the status line and the two
+     * export actions. Every entry is built with the same option helpers the rest of the dialog uses,
+     * so the remote/focus behaviour is unchanged.
      */
     private void appendAiSubtitleCategory(AppDialogPresenter settingsPresenter) {
         if (getPlaybackPresenter() == null) {

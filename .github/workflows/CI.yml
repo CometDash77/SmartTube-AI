@@ -11,6 +11,10 @@ name: Build, test and publish stbeta APK
 on:
   push:
     branches: [ "master", "production" ]
+    # A documentation-only change needs document checks, not an APK build (plan sections 15/18.6), and
+    # must not create another same-code acceptance candidate. Manual dispatch still builds any ref.
+    paths-ignore:
+      - '**/*.md'
   workflow_dispatch:
     inputs:
       release_mode:

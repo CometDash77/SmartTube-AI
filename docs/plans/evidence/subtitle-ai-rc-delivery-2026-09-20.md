@@ -44,9 +44,14 @@
 | 签名 | **debug 回退**：`apksigner verify --verbose --print-certs` 输出 `Verifies`（v1+v2），证书 SHA-256 `57209913a4bcb18ee1b7071bf7d21a17fe712a8ead5e7468fc16109eeb07eca9`（与 nightly-15 的 `c26c1da0…` 不同 → debug 身份跨运行不确定） |
 | 校验方式 | `sha256sum -c SHA256SUMS.txt`，或与本表哈希逐项比对 |
 
-说明：候选提交之后只有**文档与 CI 注释**提交（其中包含把整模块测试从 informational 升为门禁的改动），
-这些提交会再触发一次**同代码**构建（`stbeta-32.53-nightly-17-…`）。它不用于验收，验收一律使用上表的
+说明：候选提交之后只有**文档、注释与工作流**提交（包含把整模块测试从 informational 升为必需门禁、
+以及让 `push` 忽略纯 Markdown 变更）。这些提交会再触发**同代码**构建（`stbeta-32.53-nightly-17-…`、
+`stbeta-32.53-nightly-18-…`）；它们只用于验证 CI 改动本身，**不用于验收**，验收一律使用上表的
 `stbeta-32.53-nightly-16-16-debug`。
+
+已由 CI 验证的门禁改动：run https://github.com/CometDash77/SmartTube-AI/actions/runs/35488992138
+（commit `f62bf227`）conclusion **success**，其中 `Full common module suite` 作为**必需步骤**通过 —— 整模块
+`:common:testStbetaDebugUnitTest` 不再被 `continue-on-error` 隐藏。
 
 ## 4. 未完成项（阻断“成品完成”的准确缺项）
 
