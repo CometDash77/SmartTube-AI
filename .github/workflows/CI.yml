@@ -49,7 +49,9 @@ jobs:
         run: chmod +x gradlew
 
       - name: Update feed contract tests
-        run: python3 -B scripts/test_create_update_manifest.py
+        run: |
+          python3 -B scripts/test_create_update_manifest.py
+          python3 -B scripts/test_verify_signing_identity.py
 
       # Required gate for this task: the AI subtitle and local export package.
       - name: Required test scope (exoplayer.other)
@@ -263,12 +265,8 @@ jobs:
             } >> NOTES.md
             "$APKSIGNER" verify --verbose --print-certs "$apk"
             if [ "$EXPECT_PROJECT_SIGNATURE" = "true" ]; then
-              EXPECTED=$(tr -d '\r\n' < docs/release/signing-certificate.sha256)
-              ACTUAL=$("$APKSIGNER" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
-              if [ "$ACTUAL" != "$EXPECTED" ]; then
-                echo '::error::APK certificate does not match the pinned project identity'
-                exit 1
-              fi
+              "$APKSIGNER" verify --print-certs "$apk" | \
+                python3 scripts/verify-signing-identity.py docs/release/signing-certificate.sha256
             fi
           done
 
