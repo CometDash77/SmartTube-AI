@@ -148,7 +148,14 @@ public class SubtitleTranslationServiceTest {
 
         provider.translate(batch(), callback);
 
-        assertTrue(mSentRequest.getBody().contains("\"sourceLanguage\":\"de\""));
+        try {
+            org.json.JSONObject envelope = new org.json.JSONObject(mSentRequest.getBody());
+            org.json.JSONObject payload = new org.json.JSONObject(
+                    envelope.getJSONArray("messages").getJSONObject(1).getString("content"));
+            assertEquals("de", payload.getString("sourceLanguage"));
+        } catch (org.json.JSONException e) {
+            throw new AssertionError(e);
+        }
     }
 
     @Test

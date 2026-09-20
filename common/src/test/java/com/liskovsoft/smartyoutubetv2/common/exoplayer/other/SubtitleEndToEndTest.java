@@ -85,7 +85,8 @@ public class SubtitleEndToEndTest {
     }
 
     private static List<String> idsInRequest(SubtitleTranslationRequest request) throws Exception {
-        JSONObject body = new JSONObject(request.getBody());
+        JSONObject envelope = new JSONObject(request.getBody());
+        JSONObject body = new JSONObject(envelope.getJSONArray("messages").getJSONObject(1).getString("content"));
         List<String> ids = new ArrayList<>();
 
         for (int i = 0; i < body.getJSONArray("items").length(); i++) {
@@ -120,7 +121,8 @@ public class SubtitleEndToEndTest {
         SubtitleBatch other = planner.nextBatch(timeline(), 0, false);
         assertTrue(other == null || Collections.disjoint(other.getItemIds(), inFlight));
 
-        transport.succeed(0, "{\"items\":[{\"id\":\"" + inFlight.get(0) + "\",\"translation\":\"\u4e00\"}]}");
+        transport.succeed(0, SubtitleResponseParserTest.completion(
+                "{\"items\":[{\"id\":\"" + inFlight.get(0) + "\",\"translation\":\"\u4e00\"}]}", "stop"));
 
         assertEquals("\u4e00", cache.get(inFlight.get(0)));
         assertEquals(1, cache.size());

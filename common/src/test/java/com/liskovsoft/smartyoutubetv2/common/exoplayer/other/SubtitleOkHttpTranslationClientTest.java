@@ -32,6 +32,14 @@ public class SubtitleOkHttpTranslationClientTest {
         assertEquals("Bearer sk-test", wire.header("Authorization"));
         assertTrue(wire.header("Content-Type").startsWith("application/json"));
         assertTrue(wire.body().contentLength() > 0);
+        okio.Buffer bytes = new okio.Buffer();
+        wire.body().writeTo(bytes);
+        org.json.JSONObject body = new org.json.JSONObject(bytes.readUtf8());
+        assertEquals("deepseek-flash", body.getString("model"));
+        assertEquals("system", body.getJSONArray("messages").getJSONObject(0).getString("role"));
+        org.json.JSONObject payload = new org.json.JSONObject(
+                body.getJSONArray("messages").getJSONObject(1).getString("content"));
+        assertEquals("Hello", payload.getJSONArray("items").getJSONObject(0).getString("text"));
     }
 
     @Test

@@ -36,8 +36,11 @@ public final class SubtitleTranslationRequest {
             return null;
         }
 
-        return new SubtitleTranslationRequest(url, authorization, SubtitleRequestBuilder.buildPayload(
-                sourceLanguage, config.getTargetLanguage(), batch));
+        String payload = SubtitleRequestBuilder.buildPayload(sourceLanguage, config.getTargetLanguage(), batch);
+        String body = SubtitleRequestBuilder.buildChatCompletionsBody(config,
+                SubtitleProtocolInstruction.systemInstruction(config.getTargetLanguage(), null), payload,
+                SubtitleProtocolInstruction.cappedStyle(config.getInstruction()));
+        return new SubtitleTranslationRequest(url, authorization, body);
     }
 
     /**
@@ -68,6 +71,6 @@ public final class SubtitleTranslationRequest {
 
     @Override
     public String toString() {
-        return "SubtitleTranslationRequest{url=" + mUrl + ", body=" + mBody + "}";
+        return "SubtitleTranslationRequest{prepared=true}";
     }
 }

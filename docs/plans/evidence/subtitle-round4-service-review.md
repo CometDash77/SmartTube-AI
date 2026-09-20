@@ -19,8 +19,8 @@
 | 项目 | 官方文档 | 基线实现与结论 |
 | --- | --- | --- |
 | 基址 | `https://api.deepseek.com` | 默认正确；`platform.deepseek.com` 是管理站，原校验错误地允许拼上 `/chat/completions` 后发 Key |
-| 模型 | `deepseek-flash`、`deepseek-v4-pro` | 默认 `deepseek-flash` 正确，不能用旧知识随意替换；实际请求读 `config.getModel()`，不是模型写死 |
-| 请求 | model/messages/stream/max_tokens，thinking.type=disabled，response_format.type=json_object | 现有主要字段匹配官方；需要本地校验 JSON 内容 |
+| 模型 | `deepseek-flash`、`deepseek-v4-pro` | 默认值有效且编辑能保存，但基线生产请求没有 model 字段；构造器读取 config.getModel() 的代码当时没有接入发送链 |
+| 请求 | model/messages/stream/max_tokens，thinking.type=disabled，response_format.type=json_object | **实际 HTTP body 仅字幕 payload**，缺必需 model/messages；独立 builder 有字段但从未被生产调用。新增 CI 断言以 JSONException 证明缺 model |
 | 回复 | `choices[0].message.content`，`finish_reason` | **根本接入缺陷**：OkHttp 传完整 body，而 Parser 直接找外层 items；标准成功响应被判 no_items。旧测试只模拟内部 JSON，未覆盖官方外壳 |
 
 ## 本轮修改
@@ -39,3 +39,9 @@
 Jev live audit 一次/3 项，3815 input/126 output tokens，无重试/回退。保留 [原输入](subtitle-round4-jev-input.json) 与 [结果](subtitle-round4-jev-result.json)。wrapper .94/.91、live-model .96/.94 达阈值；duplicates .55/.32 低置信，人工回源检查：按完整 URL 分桶、六项语义字段判等、同桶不同语言不合并，故接受有限去重结论；真实歧义样本仍缺。审核对应保存的源码片段；其后 UI 标题参数补正和配置恢复小改人工核对，不以 Jev 认证最终产物。
 
 当前下一步：完成同一修复 SHA 的 CI，交付候选，用官方 API 基址和有效模型在电视验证连接/翻译；用户自行输入真实 Key，agent 不索取、不读取、不代发真实服务请求。未知错误若仍出现，新日志必须带 HTTP/协议阶段，继续按证据修复，不能把一次自动通过当产品验收。
+
+## 首轮 CI 揭示的更深接入缺陷与修正
+
+Run `35497368918` / `4dca086a` 失败：446 scope tests、2 failed，均为新增“修改模型应进入实际 request body”断言，抛出 JSONException（缺 model）；publish skipped，无候选。不是测试期望写错，应修生产请求。追踪 `SubtitleTranslationRequest.create`→`buildPayload`→OkHttp 直接写 body，确认 buildChatCompletionsBody 只有单测调用。此前把 builder 能力当作生产已接线的判断已在上表更正。
+
+修正 create 调用完整 Chat Completions builder，把当前模型、固定 system、字幕 payload 的 user message、配置中的风格发送出去；请求 toString 不再暴露正文。旧内层 payload 断言改为解析 messages 中的 content，新增 HTTP RequestBody 字节断言，端到端返回也改为官方外壳。这些改动人工回源审核；既有 Jev 只覆盖先前保存的三项片段，不认证新请求接线。下一次 CI 结果才是最终证据。

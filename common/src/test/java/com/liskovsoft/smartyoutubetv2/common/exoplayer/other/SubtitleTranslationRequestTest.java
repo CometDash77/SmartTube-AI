@@ -32,7 +32,13 @@ public class SubtitleTranslationRequestTest {
         assertEquals("https://api.deepseek.com/chat/completions", request.getUrl());
         assertEquals("Bearer sk-test", request.getAuthorization());
 
-        JSONObject body = new JSONObject(request.getBody());
+        JSONObject envelope = new JSONObject(request.getBody());
+        assertEquals("deepseek-flash", envelope.getString("model"));
+        assertEquals("disabled", envelope.getJSONObject("thinking").getString("type"));
+        assertEquals("json_object", envelope.getJSONObject("response_format").getString("type"));
+        assertEquals("system", envelope.getJSONArray("messages").getJSONObject(0).getString("role"));
+        assertEquals("keep it short", envelope.getJSONArray("messages").getJSONObject(2).getString("content"));
+        JSONObject body = new JSONObject(envelope.getJSONArray("messages").getJSONObject(1).getString("content"));
         assertEquals("en", body.getString("sourceLanguage"));
         assertEquals("zh-Hans", body.getString("targetLanguage"));
         assertEquals("a", body.getJSONArray("items").getJSONObject(0).getString("id"));
