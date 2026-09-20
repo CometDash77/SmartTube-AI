@@ -273,6 +273,7 @@ public class SubtitleTimelineCoordinatorTest {
 
         // The next real event resolves the identity: the same track is then prepared exactly once.
         mHost.currentKey = "key-a";
+        mFetcher.playback = new SubtitleSnapshotFetcher.Result(SubtitleSnapshotReader.Status.OK, timeline("A"));
 
         assertEquals(SubtitleTimelineCoordinator.RequestResult.STARTED, coordinator.request());
         runWorker();
@@ -280,7 +281,7 @@ public class SubtitleTimelineCoordinatorTest {
 
         assertEquals(1, mFetcher.calls);
         assertEquals(1, mHost.installs);
-        assertEquals("Hello", mHost.installed.frameAt(0).getTexts().get(0));
+        assertEquals("A", mHost.installed.frameAt(0).getTexts().get(0));
     }
 
     @Test
