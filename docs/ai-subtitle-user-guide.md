@@ -3,7 +3,7 @@
 适用版本：SmartTube stbeta 32.53（本仓库 `production` 分支的 AI 字幕功能）
 日期：2026-09-20（Asia/Hong_Kong）· 包名：`org.smarttube.beta` · minSdk 17 / targetSdk 34
 
-> **当前状态：产品验收未通过。** 指定候选 nightly-21（`fdd3ea23`）已改进 Key 标签、保存回执及 AI 关闭文案，但用户再次报告失败；具体失败阶段仍待新证据。原文字幕可显示，不保证额外时间轴已获取成功；AI 开启后的“翻译中”也不能证明已请求或已有译文。见[当前状态](plans/subtitle-current-status.md)与[重改计划](plans/subtitle-production-rework-plan.md)。下述功能为实现说明和待验步骤，不是设备验收成功承诺。
+> **当前候选 nightly-24，设备验收待完成。** nightly-22 日志已证实 Key 当前会话可用并导出 875 条原文，但翻译失败。nightly-24 修复了真实请求缺 model/messages、官方响应未解包、配置入口反馈与 HTTP 诊断等问题，456 项测试及完整 CI 通过。见[当前状态](plans/subtitle-current-status.md)与[第四轮报告](plans/evidence/subtitle-round4-service-review.md)。以下使用步骤不等于已完成电视验收。
 
 本文档面向**安装与验收这个 APK 的人**。第 1–6 节是使用说明，第 7 节是逐条验收清单，
 第 8 节列出交付物与“同一 APK 直接发布 stable”的做法，第 9 节是明确**未完成**的缺项。

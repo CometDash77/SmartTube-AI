@@ -10,7 +10,7 @@
 - `152007` 是 nightly-22：`keyConfigured=true`、`BOUND`、`snapshotStatus=OK`、一次请求/一次安装、875 条时间轴；ZIP 原文 875 条，0 条译文，18 条 FAILED、857 条 NOT_ATTEMPTED。这是当前会话 Key 可读取、原文导出成功、翻译未成功的证据，不证明重启后 Key 持久化通过。
 - 老 `-2/-3/-5` 是 nightly-18 同一阶段的累积快照，不相加统计；`-4` 和旧 ZIP 对应 nightly-9 的 520 条原文成功。
 - 最新 `statsRequests=0` 不能解释为没有发网络请求：生产发送入口未调用计数器，只有失败计数增加。连接测试结果/HTTP 状态也未记录，所以无法从旧日志恢复确切响应码或用户填写的地址/模型。
-- 最新显示模式为 `ORIGINAL_ONLY`。成功翻译后仍需选择译文/双语才能显示，不自动替用户改变模式。用户所述音频现象未包含独立证据；所审链只发文本请求，不生成音频，不能替该现象臆造原因。
+- 最新显示模式为 `ORIGINAL_ONLY`。成功翻译后仍需选择译文/双语才能显示，不自动替用户改变模式。用户已澄清“音频”是语音转写错误，不属于故障范围。
 
 ## 官方文档与实现对照
 
@@ -30,7 +30,7 @@
 3. 服务地址、模型编辑入口上移且明确“点按修改”，对话框读取当前值，保存有回执，标题不再出现未替换的 `%1$s`。菜单重开显示新值。保留自定义 HTTPS 兼容服务与任意非空模型 ID。
 4. 生产请求入口累加真实发送次数；固定事件记录连接与翻译 HTTP 码/结果。回调转交主线程再操作 dispatcher/cache/display；连接取消和配置变更有代次守卫；配置更改解除旧授权停机并恢复符合条件的预取。收到条目计数只统计真正非空译文。
 5. 对同一 URL 且 id/语言/type/mime/codecs/translatable 相同的元数据去重，显示标签差异不制造歧义；真正冲突仍拒绝。此修复覆盖可证明安全的重复情况，**不能声称已证明 nightly-21 的所有 SOURCE_AMBIGUOUS 都由这种重复导致**。
-6. 正常状态行由真实请求开始/已接受结果显示等待、请求中、已有译文或失败；原文模式下提示切换显示。旧音频描述没有复现，不擅自改音频播放。
+6. 正常状态行由真实请求开始/已接受结果显示等待、请求中、已有译文或失败；原文模式下提示切换显示。不涉及音频播放修改。
 
 ## 验证与审核
 
@@ -45,3 +45,9 @@ Jev live audit 一次/3 项，3815 input/126 output tokens，无重试/回退。
 Run `35497368918` / `4dca086a` 失败：446 scope tests、2 failed，均为新增“修改模型应进入实际 request body”断言，抛出 JSONException（缺 model）；publish skipped，无候选。不是测试期望写错，应修生产请求。追踪 `SubtitleTranslationRequest.create`→`buildPayload`→OkHttp 直接写 body，确认 buildChatCompletionsBody 只有单测调用。此前把 builder 能力当作生产已接线的判断已在上表更正。
 
 修正 create 调用完整 Chat Completions builder，把当前模型、固定 system、字幕 payload 的 user message、配置中的风格发送出去；请求 toString 不再暴露正文。旧内层 payload 断言改为解析 messages 中的 content，新增 HTTP RequestBody 字节断言，端到端返回也改为官方外壳。这些改动人工回源审核；既有 Jev 只覆盖先前保存的三项片段，不认证新请求接线。下一次 CI 结果才是最终证据。
+
+## 最终自动验证与交付
+
+最终修复 `164508024b6611327f6349295a967b5385ebb4c0`，run [35497616104](https://github.com/CometDash77/SmartTube-AI/actions/runs/35497616104) success。已解析下载的 XML：59 suites/456 tests/0 failures/errors/skipped；官方完整请求形状、响应外壳、配置修改进入真实请求、localhost HTTP 服务交付及端到端缓存均通过。双模块 lint、组装、CI 签名验证与 prerelease 发布通过。
+
+[候选 nightly-24](https://github.com/CometDash77/SmartTube-AI/releases/tag/stbeta-32.53-nightly-24-24-debug) target 精确匹配最终 SHA；4 APK + SHA256SUMS.txt，universal 45,094,687 B，清单哈希 `e034709a708fc2b328b7ef160bf0b8cfae0b0fea0521dce93bfb75d19b2af2b6`。仅下载清单核对资产信息，未本地复算 APK；签名检查来自 CI，仍是 debug 回退身份。没有真实账户/设备验收，不把自动证据写成全功能成功。
