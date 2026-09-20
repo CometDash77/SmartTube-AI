@@ -208,7 +208,7 @@ public class ScreensaverManagerTest {
     }
 
     @Test
-    public void pausedInstanceDoesNotAffectActiveInstanceOrStrandRegistryLock() throws Exception {
+    public void stoppedInstanceDoesNotAffectActiveInstanceOrStrandRegistryLock() throws Exception {
         ActivityController<BrowseHostActivity> browseController =
                 Robolectric.buildActivity(BrowseHostActivity.class);
         BrowseHostActivity browse = browseController.create().start().resume().get();
@@ -217,6 +217,7 @@ public class ScreensaverManagerTest {
         drainImmediateTasks();
 
         browseController.pause();
+        browseController.stop(); // MotherActivity releases the wake lock on onStop
         drainImmediateTasks();
         assertFalse(isScreensaverSuppressed(browse));
 
@@ -244,7 +245,8 @@ public class ScreensaverManagerTest {
         assertFalse(isRegistryLocked());
 
         playerController.pause();
-        browseController.resume();
+        playerController.stop();
+        browseController.start().resume();
         drainImmediateTasks();
 
         assertFalse(isScreensaverSuppressed(player));
@@ -287,7 +289,7 @@ public class ScreensaverManagerTest {
     }
 
     @Test
-    public void motherActivityPauseReleasesSuppression() {
+    public void motherActivityStopReleasesSuppression() {
         ActivityController<BrowseHostActivity> controller =
                 Robolectric.buildActivity(BrowseHostActivity.class);
         BrowseHostActivity activity = controller.create().start().resume().get();
@@ -299,7 +301,10 @@ public class ScreensaverManagerTest {
         drainImmediateTasks();
         assertTrue(isScreensaverSuppressed(activity));
 
+        // MotherActivity suspends on onStop (not onPause), so the real "paused and hidden" sequence is
+        // what must release the wake lock.
         controller.pause();
+        controller.stop();
         drainImmediateTasks();
         advance(DIM_TIMEOUT_MS + SCREEN_OFF_TIMEOUT_MS);
 
