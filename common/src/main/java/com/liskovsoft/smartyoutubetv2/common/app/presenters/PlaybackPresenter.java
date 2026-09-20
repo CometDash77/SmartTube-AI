@@ -6,6 +6,8 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.AppPrefsSubtitleAiB
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiPrefsStore;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiSettingsController;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleBatchPlanner;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleConnectionTest;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationClient;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleHandlerScheduler;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitlePrefetchLoop;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
@@ -85,6 +87,10 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private SubtitleAiSettingsController mAiSettings;
     private SubtitleTranslationCache mAiTranslationCache;
     private SubtitleTranslationDispatcher mAiDispatcher;
+    private SubtitleTranslationService mAiTranslationService;
+    /** True after 401/403/402: no further request is started until the credential changes (N2). */
+    private boolean mAiAuthorizationStopped;
+    private SubtitleTranslationClient.Cancellable mAiConnectionTestCall;
     private boolean mIsAiSubtitleChainReady;
     private SubtitlePrefetchLoop mAiLoop;
     private ExecutorService mAiSnapshotExecutor;
@@ -392,10 +398,11 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                     reinstateAiSubtitleTimeline();
                 });
         mAiTranslationCache = new SubtitleTranslationCache();
+        mAiTranslationService = new SubtitleTranslationService(new SubtitleOkHttpTranslationClient(),
+                mAiSettings.asConfigProvider(), mAiSettings.asKeyProvider(),
+                mAiSubtitleBinder::getActiveSourceLanguage, null);
         mAiDispatcher = new SubtitleTranslationDispatcher(new SubtitleBatchPlanner(), mAiTranslationCache,
-                new SubtitleTranslationService(new SubtitleOkHttpTranslationClient(),
-                        mAiSettings.asConfigProvider(), mAiSettings.asKeyProvider(),
-                        mAiSubtitleBinder::getActiveSourceLanguage, null),
+                mAiTranslationService,
                 () -> android.os.SystemClock.elapsedRealtime(), (batch, translations, success) -> {
                     // A finished batch repaints the frame the player is showing; a failure leaves the
                     // original subtitles untouched (the dispatcher has already recorded the attempt).
@@ -407,8 +414,20 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                         }
                     } else {
                         mAiStats.onBatchFailed();
+
+                        // A refused credential or an empty balance must not be retried blindly: stop
+                        // the loop and let the menu ask for a new key (plan 6.3, task N2).
+                        if (mAiTranslationService.isAuthorizationStopped()) {
+                            mAiAuthorizationStopped = true;
+                            mAiEvents.add("AUTH_STOP");
+
+                            if (mAiLoop != null) {
+                                mAiLoop.stop();
+                            }
+                        }
                     }
                 });
+        mAiSettings.setCredentialChangeListener(this::onAiCredentialChanged);
 
         mAiSubtitleBinder.setTranslationCache(mAiTranslationCache);
         mAiSubtitleBinder.installDispatcher(mAiDispatcher);
@@ -488,6 +507,67 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         }
 
         return mAiTimeline;
+    }
+
+    /**
+     * A stored credential changed through the active settings controller: allow requests again. The
+     * cached translations stay valid, because the key is not part of the configuration namespace.
+     */
+    private void onAiCredentialChanged() {
+        mAiAuthorizationStopped = false;
+        mAiEvents.add("CREDENTIAL_CHANGED");
+
+        if (mAiLoop != null && mAiSettings != null && mAiSettings.getSettings().isEnabled()
+                && mAiSettings.isKeyConfigured()) {
+            mAiLoop.start(); // resume immediately instead of waiting for the switch to be toggled
+        }
+    }
+
+    /** True when the last attempts were refused because of the credentials or the billing state. */
+    public boolean isAiSubtitleAuthorizationStopped() {
+        return mAiAuthorizationStopped;
+    }
+
+    /** Result of the manual connection test of the AI settings menu. */
+    public interface OnAiSubtitleConnectionTestFinished {
+        void onAiSubtitleConnectionTestFinished(SubtitleConnectionTest.Outcome outcome);
+    }
+
+    /**
+     * Sends one minimal synthetic batch with the current configuration, so the user can verify a key
+     * and an endpoint without playing a video (plan 18.3). It never sends the subtitles being watched
+     * and reports only a classified outcome, never a response body or a key.
+     *
+     * @return true when an attempt was started
+     */
+    public boolean testAiSubtitleConnection(OnAiSubtitleConnectionTestFinished listener) {
+        buildAiSubtitleChain();
+
+        if (mAiSettings == null) {
+            return false;
+        }
+
+        cancelAiSubtitleConnectionTest();
+
+        SubtitleConnectionTest.Listener forwarder = outcome -> {
+            if (listener != null) {
+                mMainHandler.post(() -> listener.onAiSubtitleConnectionTestFinished(outcome));
+            }
+        };
+
+        SubtitleTranslationClient.Cancellable call = new SubtitleConnectionTest(new SubtitleOkHttpTranslationClient())
+                .test(mAiSettings.getSettings().getConfig(), mAiSettings.asKeyProvider().getApiKey(), null, forwarder);
+
+        mAiConnectionTestCall = call;
+
+        return true;
+    }
+
+    private void cancelAiSubtitleConnectionTest() {
+        if (mAiConnectionTestCall != null) {
+            mAiConnectionTestCall.cancel();
+            mAiConnectionTestCall = null;
+        }
     }
 
     /** Only accepted attempts may become the current diagnostic state (task N1). */
@@ -773,6 +853,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
         mAiEvents.add("ENGINE_RELEASED");
         cancelAiSubtitleTimeline();
+        cancelAiSubtitleConnectionTest();
         mAiTimeline = null; // the coordinator and its identity belong to the released surface
 
         if (mAiSnapshotExecutor != null) {

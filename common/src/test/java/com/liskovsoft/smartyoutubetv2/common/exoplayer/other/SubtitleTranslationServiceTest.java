@@ -161,6 +161,33 @@ public class SubtitleTranslationServiceTest {
     }
 
     @Test
+    public void anAuthenticationFailureStopsTheSessionUntilAnAnswerSucceeds() {
+        RecordingCallback callback = new RecordingCallback();
+        SubtitleTranslationService service = service("sk-test");
+        service.translate(batch(), callback);
+
+        mHandler.onResponse(401, -1, false, "");
+
+        assertTrue("401/403/402 must stop the session, not be retried", service.isAuthorizationStopped());
+
+        service.translate(batch(), callback);
+        mHandler.onResponse(200, -1, false, "{\"items\":[]}");
+
+        assertFalse("a delivered answer clears the stop", service.isAuthorizationStopped());
+    }
+
+    @Test
+    public void anUnrelatedFailureDoesNotStopTheSession() {
+        RecordingCallback callback = new RecordingCallback();
+        SubtitleTranslationService service = service("sk-test");
+        service.translate(batch(), callback);
+
+        mHandler.onResponse(400, -1, false, "");
+
+        assertFalse(service.isAuthorizationStopped());
+    }
+
+    @Test
     public void requestCarriesTheSystemInstructionOfTheConfiguration() {
         service("sk-test").translate(batch(), new RecordingCallback());
 

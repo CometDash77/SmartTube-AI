@@ -44,6 +44,20 @@ public class SubtitleAiMenuStateTest {
     }
 
     @Test
+    public void aRejectedKeyIsVisibleAndOffersTheConfigurationEntry() {
+        assertEquals(SubtitleAiMenuState.Status.AUTH_FAILED,
+                SubtitleAiMenuState.of(true, true, true, true, 0));
+        assertTrue(SubtitleAiMenuState.offersConfiguration(SubtitleAiMenuState.Status.AUTH_FAILED));
+        assertTrue(SubtitleAiMenuState.showsOriginalOnly(SubtitleAiMenuState.Status.AUTH_FAILED));
+    }
+
+    @Test
+    public void anAuthorizationStopWithoutAKeyIsStillReportedAsMissingKey() {
+        assertEquals(SubtitleAiMenuState.Status.NO_KEY,
+                SubtitleAiMenuState.of(true, true, false, true, 0));
+    }
+
+    @Test
     public void everyStateExceptTranslatingStillShowsTheOriginal() {
         assertFalse(SubtitleAiMenuState.showsOriginalOnly(SubtitleAiMenuState.Status.TRANSLATING));
         assertTrue(SubtitleAiMenuState.showsOriginalOnly(SubtitleAiMenuState.Status.AI_OFF));

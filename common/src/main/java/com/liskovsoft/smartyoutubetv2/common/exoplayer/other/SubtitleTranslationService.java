@@ -37,6 +37,8 @@ public class SubtitleTranslationService implements SubtitleTranslationDispatcher
     private final SourceLanguageProvider mSourceLanguageProvider;
     private final String mUserStyle;
     private long mLastRetryDelayMs;
+    /** Set when the service refused the credentials or the billing state; cleared by a success. */
+    private boolean mAuthorizationStopped;
 
     public SubtitleTranslationService(SubtitleTranslationClient client, ConfigProvider configProvider,
                                       KeyProvider keyProvider, String sourceLanguage, String userStyle) {
@@ -80,6 +82,11 @@ public class SubtitleTranslationService implements SubtitleTranslationDispatcher
                                 status, retryAfterMs, 0, truncated, body, batch.getItemIds());
 
                         mLastRetryDelayMs = outcome.isDelivered() ? 0 : outcome.getDelayMs();
+                        // 401/403/402 stop the configuration session instead of being retried; the
+                        // owner of the loop must not start another request until the key is replaced
+                        // (plan 6.3, task N2).
+                        mAuthorizationStopped = !outcome.isDelivered()
+                                && outcome.getAction() == SubtitleRetryPolicy.Action.STOP_SESSION;
 
                         if (outcome.isDelivered()) {
                             callback.onSuccess(batch, align(batch, outcome.getTranslations()));
@@ -104,6 +111,14 @@ public class SubtitleTranslationService implements SubtitleTranslationDispatcher
      */
     public long getLastRetryDelayMs() {
         return mLastRetryDelayMs;
+    }
+
+    /**
+     * True when the last finished attempt was refused because of the credentials or the billing state
+     * (HTTP 401/403/402). The menu uses it to ask for a new key instead of retrying blindly.
+     */
+    public boolean isAuthorizationStopped() {
+        return mAuthorizationStopped;
     }
 
     /** One entry per batch item, after final validation; a missing entry stays null. */

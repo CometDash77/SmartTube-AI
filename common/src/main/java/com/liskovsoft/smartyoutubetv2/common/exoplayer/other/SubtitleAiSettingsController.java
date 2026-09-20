@@ -16,9 +16,19 @@ public class SubtitleAiSettingsController {
         void onConfigurationChanged();
     }
 
+    /**
+     * Notified when the stored credential changed. This is deliberately not a configuration change:
+     * the key is not part of the cache namespace, so translations produced with the previous key stay
+     * valid, while a stopped session has to be allowed to start again.
+     */
+    public interface CredentialChangeListener {
+        void onCredentialChanged();
+    }
+
     private final SubtitleAiPrefsStore mPrefsStore;
     private final SubtitleKeyStore mKeyStore;
     private final ConfigurationChangeListener mListener;
+    private CredentialChangeListener mCredentialListener;
     private SubtitleAiSettings mSettings;
 
     public SubtitleAiSettingsController(SubtitleAiPrefsStore prefsStore, SubtitleKeyStore keyStore,
@@ -27,6 +37,10 @@ public class SubtitleAiSettingsController {
         mKeyStore = keyStore;
         mListener = listener;
         mSettings = prefsStore != null ? prefsStore.load() : SubtitleAiSettings.defaults();
+    }
+
+    public void setCredentialChangeListener(CredentialChangeListener credentialListener) {
+        mCredentialListener = credentialListener;
     }
 
     public SubtitleAiSettings getSettings() {
@@ -73,9 +87,22 @@ public class SubtitleAiSettingsController {
                 mSettings.getTargetLanguage(), mSettings.getInstruction());
     }
 
+    /**
+     * A different origin means the key must not be sent to the new host, so the stored credential is
+     * forgotten and the user is asked for it again (plan 6.3/18.3).
+     */
     public void setEndpointBaseUrl(String endpointBaseUrl) {
+        String previous = mSettings.getConfig().getEndpointBaseUrl();
         updateConfig(endpointBaseUrl, mSettings.getConfig().getModel(),
                 mSettings.getTargetLanguage(), mSettings.getInstruction());
+
+        if (!SubtitleEndpoint.isSameOrigin(previous, endpointBaseUrl)) {
+            forgetKey();
+
+            if (mCredentialListener != null) {
+                mCredentialListener.onCredentialChanged();
+            }
+        }
     }
 
     public void setInstruction(String instruction) {
@@ -89,13 +116,42 @@ public class SubtitleAiSettingsController {
                 mSettings.getTargetLanguage(), null);
     }
 
+    /**
+     * Stores a key through the same store the running service reads, so a replacement takes effect
+     * without a restart (task N2). Blank input is refused instead of replacing a stored key.
+     *
+     * @return true when the key was stored
+     */
+    public boolean saveKey(String apiKey) {
+        if (mKeyStore == null || apiKey == null || apiKey.trim().isEmpty()) {
+            return false;
+        }
+
+        if (!mKeyStore.save(apiKey.trim())) {
+            return false;
+        }
+
+        if (mCredentialListener != null) {
+            mCredentialListener.onCredentialChanged();
+        }
+
+        return true;
+    }
+
     /** For a "clear the key" action: forgets the key and stops authorizing requests. */
     public void clearKey() {
+        forgetKey();
+        notifyConfigurationChanged();
+
+        if (mCredentialListener != null) {
+            mCredentialListener.onCredentialChanged();
+        }
+    }
+
+    private void forgetKey() {
         if (mKeyStore != null) {
             mKeyStore.clear();
         }
-
-        notifyConfigurationChanged();
     }
 
     public SubtitleTranslationService.ConfigProvider asConfigProvider() {

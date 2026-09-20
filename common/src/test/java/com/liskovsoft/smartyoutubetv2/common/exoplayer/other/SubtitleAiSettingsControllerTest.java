@@ -18,6 +18,7 @@ import static org.junit.Assert.assertTrue;
 public class SubtitleAiSettingsControllerTest {
     private Map<String, String> mStore;
     private int mConfigChanges;
+    private int mCredentialChanges;
     private SubtitleAiSettingsController mController;
 
     @Before
@@ -38,6 +39,7 @@ public class SubtitleAiSettingsControllerTest {
                         mStore.put(key, value);
                     }
                 }), keyStore, () -> mConfigChanges++);
+        mController.setCredentialChangeListener(() -> mCredentialChanges++);
     }
 
     @Test
@@ -109,6 +111,49 @@ public class SubtitleAiSettingsControllerTest {
         assertFalse(mController.isKeyConfigured());
         assertNull(mController.asKeyProvider().getApiKey());
         assertEquals(before + 1, mConfigChanges);
+    }
+
+    @Test
+    public void aSavedKeyGoesThroughTheActiveStoreAndNotifiesTheCredentialListener() {
+        assertTrue(mController.saveKey("  sk-replaced  "));
+
+        assertEquals("sk-replaced", mController.asKeyProvider().getApiKey());
+        assertEquals(1, mCredentialChanges);
+        assertEquals("a key change must not invalidate cached results", 0, mConfigChanges);
+    }
+
+    @Test
+    public void aBlankKeyIsRefusedWithoutReplacingTheStoredOne() {
+        assertFalse(mController.saveKey("   "));
+        assertFalse(mController.saveKey(null));
+
+        assertEquals("sk-test", mController.asKeyProvider().getApiKey());
+        assertEquals(0, mCredentialChanges);
+    }
+
+    @Test
+    public void aDifferentEndpointOriginForgetsTheKeyAndAsksAgain() {
+        mController.setEndpointBaseUrl("https://other.example.com");
+
+        assertFalse("the key must never be sent to another origin", mController.isKeyConfigured());
+        assertEquals(1, mCredentialChanges);
+    }
+
+    @Test
+    public void theSameEndpointOriginKeepsTheKey() {
+        mController.setEndpointBaseUrl("https://api.deepseek.com/v1");
+
+        assertTrue(mController.isKeyConfigured());
+        assertEquals(0, mCredentialChanges);
+    }
+
+    @Test
+    public void clearingTheKeyNotifiesBothListeners() {
+        mController.clearKey();
+
+        assertFalse(mController.isKeyConfigured());
+        assertEquals(1, mCredentialChanges);
+        assertEquals(1, mConfigChanges);
     }
 
     @Test

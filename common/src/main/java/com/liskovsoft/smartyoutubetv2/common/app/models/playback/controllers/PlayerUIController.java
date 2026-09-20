@@ -37,8 +37,8 @@ import com.liskovsoft.smartyoutubetv2.common.app.presenters.dialogs.menu.VideoMe
 import com.liskovsoft.smartyoutubetv2.common.app.presenters.settings.AutoFrameRateSettingsPresenter;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiMenuState;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleComposer;
-import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleKeyStore;
-import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleKeyStores;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleConnectionTest;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleEndpoint;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTargetLanguages;
 import com.liskovsoft.smartyoutubetv2.common.utils.SimpleEditDialog;
 import com.liskovsoft.smartyoutubetv2.common.app.models.playback.ui.OptionItem;
@@ -320,45 +320,15 @@ public class PlayerUIController extends BasePlayerController {
                     languageOptions);
         }
 
-        SubtitleKeyStore keyStore = SubtitleKeyStores.create(getContext());
-        boolean keyConfigured = settings != null && settings.isKeyConfigured();
-
-        settingsPresenter.appendSingleButton(UiOptionItem.from(getContext().getString(R.string.ai_subtitle_settings),
-                option -> SimpleEditDialog.showPassword(getContext(),
-                        getContext().getString(R.string.ai_subtitle_settings),
-                        null,
-                        newValue -> {
-                            if (keyStore == null || newValue == null || newValue.trim().isEmpty()) {
-                                return false; // the plan refuses an empty key submission
-                            }
-
-                            boolean saved = keyStore.save(newValue);
-
-                            if (saved && getPlaybackPresenter() != null) {
-                                getPlaybackPresenter().requestAiSubtitleTimeline();
-                            }
-
-                            return saved;
-                        })));
-
-        if (keyConfigured) {
-            SubtitleAiSettingsController settingsToClear = settings;
-
-            settingsPresenter.appendSingleButton(UiOptionItem.from(getContext().getString(R.string.ai_subtitle_clear_key),
-                    option -> {
-                        if (settingsToClear != null) {
-                            settingsToClear.clearKey();
-                        }
-
-                        if (keyStore != null) {
-                            keyStore.clear();
-                        }
-                    }));
+        if (settings != null) {
+            appendAiServiceEntries(settingsPresenter, settings);
+            appendAiKeyEntries(settingsPresenter, settings);
         }
 
         SubtitleAiMenuState.Status status = SubtitleAiMenuState.of(enabled,
                 getPlayer() != null && getPlayer().getSubtitleFormat() != null,
                 settings != null && settings.isKeyConfigured(),
+                getPlaybackPresenter().isAiSubtitleAuthorizationStopped(),
                 getPlaybackPresenter().getAiSubtitlePauseMs());
 
         settingsPresenter.appendSingleButton(UiOptionItem.from(
@@ -374,6 +344,153 @@ public class PlayerUIController extends BasePlayerController {
         settingsPresenter.appendSingleButton(UiOptionItem.from(
                 getContext().getString(R.string.ai_subtitle_export_diagnostics),
                 option -> startAiSubtitleExport(false)));
+    }
+
+    /** Service address, model and expression style; each change voids cached results (plan 6.3). */
+    private void appendAiServiceEntries(AppDialogPresenter settingsPresenter, SubtitleAiSettingsController settings) {
+        String endpoint = settings.getSettings().getConfig().getEndpointBaseUrl();
+
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_endpoint, endpoint),
+                option -> SimpleEditDialog.show(getContext(),
+                        getContext().getString(R.string.ai_subtitle_endpoint),
+                        getContext().getString(R.string.ai_subtitle_endpoint_hint),
+                        endpoint,
+                        newValue -> {
+                            if (SubtitleEndpoint.chatCompletionsUrl(newValue) == null) {
+                                MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_endpoint_invalid);
+
+                                return false; // keep the dialog open so the value can be corrected
+                            }
+
+                            settings.setEndpointBaseUrl(newValue.trim());
+
+                            return true;
+                        })));
+
+        String model = settings.getSettings().getConfig().getModel();
+
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_model, model),
+                option -> SimpleEditDialog.show(getContext(),
+                        getContext().getString(R.string.ai_subtitle_model),
+                        model,
+                        newValue -> {
+                            settings.setModel(newValue.trim());
+
+                            return true;
+                        })));
+
+        String instruction = settings.getSettings().getInstruction();
+
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_instruction),
+                option -> SimpleEditDialog.show(getContext(),
+                        getContext().getString(R.string.ai_subtitle_instruction),
+                        getContext().getString(R.string.ai_subtitle_instruction_hint),
+                        instruction != null ? instruction : "",
+                        newValue -> {
+                            settings.setInstruction(newValue.trim());
+
+                            return true;
+                        })));
+
+        if (instruction != null && !instruction.isEmpty()) {
+            settingsPresenter.appendSingleButton(UiOptionItem.from(
+                    getContext().getString(R.string.ai_subtitle_instruction_reset),
+                    option -> settings.restoreDefaultInstruction()));
+        }
+    }
+
+    /**
+     * The credential entries. The key is always written through the active settings controller, so a
+     * replacement takes effect for the running service without a restart and no second store instance
+     * can hold a stale key (task N2).
+     */
+    private void appendAiKeyEntries(AppDialogPresenter settingsPresenter, SubtitleAiSettingsController settings) {
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_settings),
+                option -> SimpleEditDialog.showPassword(getContext(),
+                        getContext().getString(R.string.ai_subtitle_settings),
+                        null,
+                        newValue -> {
+                            if (!settings.saveKey(newValue)) {
+                                MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_key_save_failed);
+
+                                return false;
+                            }
+
+                            if (!settings.isKeyPersistent()) {
+                                MessageHelpers.showLongMessage(getContext(), R.string.ai_subtitle_key_session_only);
+                            }
+
+                            // The original timeline is independent of the key; requesting it is a no-op
+                            // when the source already has one.
+                            if (getPlaybackPresenter() != null) {
+                                getPlaybackPresenter().requestAiSubtitleTimeline();
+                            }
+
+                            return true;
+                        })));
+
+        if (settings.isKeyConfigured()) {
+            settingsPresenter.appendSingleButton(UiOptionItem.from(
+                    getContext().getString(R.string.ai_subtitle_clear_key),
+                    option -> settings.clearKey()));
+        }
+
+        settingsPresenter.appendSingleButton(UiOptionItem.from(
+                getContext().getString(R.string.ai_subtitle_test_connection),
+                option -> testAiSubtitleConnection()));
+    }
+
+    /**
+     * One minimal synthetic request with the current configuration, so a key and an address can be
+     * verified without playing a video. Nothing about the watched subtitles is sent.
+     */
+    private void testAiSubtitleConnection() {
+        PlaybackPresenter presenter = getPlaybackPresenter();
+
+        if (presenter == null || getContext() == null) {
+            return;
+        }
+
+        MessageHelpers.showMessage(getContext(), R.string.ai_subtitle_test_running);
+        presenter.testAiSubtitleConnection(this::onAiSubtitleConnectionTestFinished);
+    }
+
+    /** Runs on the UI thread (the presenter forwards through its main handler). */
+    private void onAiSubtitleConnectionTestFinished(SubtitleConnectionTest.Outcome outcome) {
+        Context context = getContext();
+
+        if (context == null || outcome == null) {
+            return;
+        }
+
+        MessageHelpers.showLongMessage(context, aiSubtitleConnectionOutcomeResId(outcome));
+    }
+
+    private static int aiSubtitleConnectionOutcomeResId(SubtitleConnectionTest.Outcome outcome) {
+        switch (outcome) {
+            case OK:
+                return R.string.ai_subtitle_test_ok;
+            case NOT_CONFIGURED:
+                return R.string.ai_subtitle_test_not_configured;
+            case AUTH_FAILED:
+                return R.string.ai_subtitle_test_auth_failed;
+            case NO_BALANCE:
+                return R.string.ai_subtitle_test_no_balance;
+            case RATE_LIMITED:
+                return R.string.ai_subtitle_test_rate_limited;
+            case SERVER_ERROR:
+                return R.string.ai_subtitle_test_server_error;
+            case NETWORK:
+                return R.string.ai_subtitle_test_network;
+            case PROTOCOL:
+                return R.string.ai_subtitle_test_protocol;
+            default:
+                return R.string.ai_subtitle_test_bad_request;
+        }
     }
 
     /**
@@ -479,6 +596,8 @@ public class PlayerUIController extends BasePlayerController {
         switch (status) {
             case NO_KEY:
                 return R.string.ai_subtitle_status_no_key;
+            case AUTH_FAILED:
+                return R.string.ai_subtitle_status_auth_failed;
             case NO_SOURCE:
                 return R.string.ai_subtitle_status_no_source;
             case PAUSED:

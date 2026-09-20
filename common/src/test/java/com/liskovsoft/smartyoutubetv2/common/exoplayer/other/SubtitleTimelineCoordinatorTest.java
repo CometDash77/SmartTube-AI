@@ -10,8 +10,9 @@ import org.robolectric.RobolectricTestRunner;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 
@@ -36,7 +37,10 @@ public class SubtitleTimelineCoordinatorTest {
     private final Deque<Runnable> mMainQueue = new ArrayDeque<>();
     private final FakeHost mHost = new FakeHost();
     private final FakeFetcher mFetcher = new FakeFetcher();
+    /** Every settled attempt, including the ones that were discarded as stale. */
     private final List<String> mStatuses = new ArrayList<>();
+    /** Only the attempts that were allowed to become the current state. */
+    private final List<String> mAcceptedStatuses = new ArrayList<>();
     private final List<Boolean> mAccepted = new ArrayList<>();
     private final List<Boolean> mInstalled = new ArrayList<>();
 
@@ -46,6 +50,10 @@ public class SubtitleTimelineCoordinatorTest {
                     mStatuses.add(status);
                     mAccepted.add(accepted);
                     mInstalled.add(installed);
+
+                    if (accepted) {
+                        mAcceptedStatuses.add(status);
+                    }
                 });
     }
 
@@ -94,16 +102,18 @@ public class SubtitleTimelineCoordinatorTest {
         mFetcher.playback = new SubtitleSnapshotFetcher.Result(SubtitleSnapshotReader.Status.OK, timeline("B"));
         assertTrue(coordinator.request());
         runWorker();
+
+        // The abandoned answer settles first, exactly like a late callback; then the live one.
+        runMain();
+
+        assertEquals("a stale answer must not install a timeline", 0, mHost.installs);
+        assertEquals("a stale answer must not become the current state", 0, mAcceptedStatuses.size());
+
         runMain();
 
         assertEquals(1, mHost.installs);
         assertEquals("B", mHost.installed.frameAt(0).getTexts().get(0));
-        assertEquals("OK", mStatuses.get(0));
-
-        runMain(); // the stale answer of the previous source
-
-        assertEquals("a stale answer must not install a timeline", 1, mHost.installs);
-        assertEquals("a stale answer must not overwrite the live status", 1, mStatuses.size());
+        assertEquals(Arrays.asList("OK"), mAcceptedStatuses);
         assertNotNull(mHost.installed);
     }
 
@@ -132,7 +142,8 @@ public class SubtitleTimelineCoordinatorTest {
 
         assertEquals(1, mHost.installs);
         assertEquals("B", mHost.installed.frameAt(0).getTexts().get(0));
-        assertEquals(1, mStatuses.size());
+        assertEquals(Arrays.asList("OK"), mAcceptedStatuses);
+        assertEquals("both attempts settled, only one counted", 2, mStatuses.size());
     }
 
     @Test
@@ -152,7 +163,12 @@ public class SubtitleTimelineCoordinatorTest {
 
         mFetcher.playback = new SubtitleSnapshotFetcher.Result(SubtitleSnapshotReader.Status.OK, timeline("A"));
         assertTrue("an explicit later event may retry", coordinator.request());
+        runWorker();
+        runMain();
+
         assertEquals(2, mFetcher.calls);
+        assertEquals("the retry installs its timeline", 1, mHost.installs);
+        assertEquals(Arrays.asList("TIMEOUT", "OK"), mAcceptedStatuses);
     }
 
     @Test
@@ -178,9 +194,12 @@ public class SubtitleTimelineCoordinatorTest {
         mHost.select("key-a", "https://example.com/a");
 
         coordinator.request();
+        runWorker(); // the read is in flight; the recorded cancellation must reflect the later event
         mHost.select(null, null);
+
         assertFalse(coordinator.request());
 
+        assertFalse("no attempt may outlive subtitles-off", coordinator.isAttemptInFlight());
         assertTrue(mFetcher.cancellations.get(0).isCancelled());
     }
 
