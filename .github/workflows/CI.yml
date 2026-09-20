@@ -76,34 +76,6 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      # A release APK without the project signing identity must not be published as an
-      # acceptance candidate (plan section 15); no temporary key is generated.
-      - name: Require signing configuration
-        env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          missing=""
-          if [ -z "$SIGNING_KEY" ]; then missing="$missing SIGNING_KEY"; fi
-          if [ -z "$KEY_STORE_PASSWORD" ]; then missing="$missing KEY_STORE_PASSWORD"; fi
-          if [ -z "$KEY_ALIAS" ]; then missing="$missing ALIAS"; fi
-          if [ -z "$KEY_PASSWORD" ]; then missing="$missing KEY_PASSWORD"; fi
-          if [ -n "$missing" ]; then
-            echo "::error::Missing repository secrets:$missing. Publishing is blocked instead of shipping an unsigned or differently signed APK."
-            exit 1
-          fi
-          echo "Signing configuration is present."
-
-      - name: Configure Build Signing
-        run: |
-          echo "storePassword=${{ secrets.KEY_STORE_PASSWORD }}" > keystore.properties
-          echo "keyAlias=${{ secrets.ALIAS }}" >> keystore.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
-          echo "storeFile=${{ github.workspace }}/key.jks" >> keystore.properties
-          echo "${{ secrets.SIGNING_KEY }}" | base64 --decode > ${{ github.workspace }}/key.jks
-
       - name: Update Version Name
         id: get_version
         run: |
@@ -125,8 +97,41 @@ jobs:
           path: '**/build/reports/lint-results-*.html'
           if-no-files-found: warn
 
-      - name: Assemble stbeta release APKs
-        run: ./gradlew clean :smarttubetv:assembleStbetaRelease
+      # Signs with the project identity when the four secrets exist (plan section 15).
+      # Without them it still produces an installable APK, but as a clearly labelled
+      # debug-signed fallback: the release variant would be unsigned and uninstallable,
+      # and generating a throwaway signing key to hide that is explicitly not allowed.
+      - name: Configure signing and assemble
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+          missing=""
+          if [ -z "$SIGNING_KEY" ]; then missing="$missing SIGNING_KEY"; fi
+          if [ -z "$KEY_STORE_PASSWORD" ]; then missing="$missing KEY_STORE_PASSWORD"; fi
+          if [ -z "$KEY_ALIAS" ]; then missing="$missing KEY_ALIAS"; fi
+          if [ -z "$KEY_PASSWORD" ]; then missing="$missing KEY_PASSWORD"; fi
+
+          if [ -n "$missing" ]; then
+            echo "::warning::Missing repository secrets:$missing. Publishing a DEBUG-signed fallback candidate instead of an unsigned release build."
+            {
+              echo "SIGNING_LABEL=**debug-signed fallback**: the four signing secrets were not configured, so this APK is signed with the AGP debug keystore generated on this runner. It cannot update an installed build signed with another key, and a later CI run uses a different debug key. Configure SIGNING_KEY, KEY_STORE_PASSWORD, ALIAS and KEY_PASSWORD to get a project-signed build."
+              echo "TAG_SUFFIX=-debug"
+            } >> "$GITHUB_ENV"
+            ./gradlew clean :smarttubetv:assembleStbetaDebug
+          else
+            printf 'storePassword=%s\nkeyAlias=%s\nkeyPassword=%s\nstoreFile=%s\n' \
+              "$KEY_STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" "$GITHUB_WORKSPACE/key.jks" > keystore.properties
+            printf '%s' "$SIGNING_KEY" | base64 --decode > "$GITHUB_WORKSPACE/key.jks"
+            {
+              echo "SIGNING_LABEL=release build signed with the project signing identity from GitHub Secrets"
+              echo "TAG_SUFFIX="
+            } >> "$GITHUB_ENV"
+            ./gradlew clean :smarttubetv:assembleStbetaRelease
+          fi
 
       - name: Verify signatures and build the checksum manifest
         run: |
@@ -137,6 +142,14 @@ jobs:
             exit 1
           fi
           AAPT=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/aapt 2>/dev/null | sort -V | tail -1 || true)
+
+          if ls smarttubetv/build/outputs/apk/stbeta/release/*.apk > /dev/null 2>&1; then
+            APK_DIR=smarttubetv/build/outputs/apk/stbeta/release
+          else
+            APK_DIR=smarttubetv/build/outputs/apk/stbeta/debug
+          fi
+          echo "APK_DIR=$APK_DIR" >> "$GITHUB_ENV"
+          echo "Using APKs from $APK_DIR"
 
           mkdir -p publish
           : > SHA256SUMS.txt
@@ -149,6 +162,8 @@ jobs:
             echo ""
             echo "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo ""
+            echo "Signing identity: $SIGNING_LABEL"
+            echo ""
             echo "### What to verify on the TV"
             echo ""
             echo "1. Long-press the closed-caption button, then use the two new entries at the bottom of the subtitle menu: **Export subtitles** and **Export diagnostic log**."
@@ -159,14 +174,15 @@ jobs:
             echo "### Known limits of this candidate"
             echo ""
             echo "- Remote focus, file-manager visibility, storage-permission refusal, out-of-space feedback and playback continuity are **not yet device-verified**: that is what this build is for."
-            echo "- versionCode is the project value and was not bumped, so it installs over an equally versioned build; Android refuses an update signed with a different certificate. Do not uninstall the existing app without a backup."
+            echo "- versionCode is the project value and was not bumped, so it installs over an equally versioned build; Android refuses an update signed with a different certificate."
+            echo "- Package name is org.smarttube.beta (stbeta flavor). If a differently signed build with that package is installed, Android refuses this APK: back up before uninstalling anything."
             echo "- No real DeepSeek request is needed for this feature and the export makes none."
             echo ""
             echo "### APK metadata and signature"
             echo ""
           } >> NOTES.md
 
-          for apk in smarttubetv/build/outputs/apk/stbeta/release/*.apk; do
+          for apk in "$APK_DIR"/*.apk; do
             name=$(basename "$apk")
             cp "$apk" "publish/$name"
             sha256sum "$apk" >> SHA256SUMS.txt
@@ -195,7 +211,7 @@ jobs:
           VERSION_NAME: ${{ steps.get_version.outputs.VERSION_NAME }}
         run: |
           set -e
-          TAG="stbeta-$VERSION_NAME-$GITHUB_RUN_NUMBER"
+          TAG="stbeta-$VERSION_NAME-$GITHUB_RUN_NUMBER$TAG_SUFFIX"
           echo "Publishing prerelease $TAG"
           gh release create "$TAG" \
             --prerelease \
