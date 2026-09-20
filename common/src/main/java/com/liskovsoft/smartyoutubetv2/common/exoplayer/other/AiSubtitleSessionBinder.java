@@ -37,6 +37,11 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         void onTranslationDisplayed();
     }
 
+    /** Supplies whether this configuration can translate at all (a key is configured). */
+    public interface TranslationAvailability {
+        boolean isAvailable();
+    }
+
     private final AiSubtitleController mController;
     private final SubtitleDisplay mDisplay;
     private final SubtitleSourceProvider mSourceProvider;
@@ -44,7 +49,16 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
     private SubtitleTranslationDispatcher mDispatcher;
     private SubtitleTranslationCache mTranslationCache;
     private SubtitleSessionContext mSessionContext;
-    private SubtitleTimeline mTimeline;
+    /** The raw snapshot of the source: the export and the fallback always use this one. */
+    private SubtitleTimeline mRawTimeline;
+    /** Derived sentences of the same source, or null while the rule is off or unusable. */
+    private SubtitleTimeline mDerivedTimeline;
+    /** The timeline the display and the prefetch consume right now (raw, or derived when active). */
+    private SubtitleTimeline mActiveTimeline;
+    private boolean mRuleSegmentation;
+    private TranslationAvailability mAvailability;
+    /** True while the derived sentence frame owns the screen; used for an immediate raw fallback. */
+    private boolean mDerivedApplied;
     /** Source key the installed timeline belongs to; a mismatch means "not exportable yet". */
     private String mTimelineSourceKey;
     private List<SubtitleItem> mFrameItems = Collections.emptyList();
@@ -92,6 +106,7 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
     public void onSeekEnd() {
         mController.onSeek();
         cancelDispatcher(); // an in-flight batch belongs to the abandoned position
+        dropDerivedDisplay(); // the sentence of the old position must not stay on screen
         mDisplay.resetOriginalCueState();
 
         if (mSessionContext != null) {
@@ -119,6 +134,7 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
 
     public void onAiEnabled(boolean enabled) {
         mController.setAiEnabled(enabled);
+        installActiveTimeline(); // AI off hands the original text back to the native cues
     }
 
     /**
@@ -158,7 +174,7 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
      *         was obtained yet
      */
     public boolean retranslateCurrentSource() {
-        if (!mController.isAiEnabled() || !mController.hasActiveSession() || mTimeline == null) {
+        if (!mController.isAiEnabled() || !mController.hasActiveSession() || mActiveTimeline == null) {
             return false;
         }
 
@@ -178,7 +194,7 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         }
 
         if (mDispatcher != null) {
-            mDispatcher.setTimeline(mTimeline); // planner reset: the window is planned again
+            mDispatcher.setTimeline(mActiveTimeline); // planner reset: the window is planned again
         }
 
         applyCurrentFrame(); // with an empty cache this composes the original text again
@@ -200,12 +216,17 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
 
     public void onDisplayMode(int mode) {
         mController.setDisplayMode(mode);
+        installActiveTimeline(); // "original only" uses the native cues, the other modes the sentences
     }
 
     /** Engine release / player destroy. */
     public void onEngineReleased() {
         mController.release();
         cancelDispatcher();
+        mDerivedApplied = false;
+        mRawTimeline = null;
+        mDerivedTimeline = null;
+        mActiveTimeline = null;
     }
 
     /** Installs the prefetch driver; it is only called while AI subtitles are on. */
@@ -276,15 +297,108 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
      * replaces the previous one; the caller must also tell the controller about the source change.
      */
     public void setTimeline(SubtitleTimeline timeline) {
-        mTimeline = timeline;
+        mRawTimeline = timeline;
+        mDerivedTimeline = null; // a new source has no derived sentences yet
         mTimelineSourceKey = timeline != null ? mController.getActiveSourceKey() : null;
-        // The tracked frame belonged to the previous timeline; until the next tick recomputes it, a
-        // stray repaint must not write cache entries of an unrelated frame.
-        onFrameItems(null);
+        installActiveTimeline();
+    }
+
+    /**
+     * Installs the rule-segmented sentences of the same source (plan 4.3), or null when segmentation
+     * is off or its derived timeline was refused. A different timeline means different item ids, so
+     * the planner starts over instead of inheriting bookkeeping of the previous unit set.
+     */
+    public void setDerivedTimeline(SubtitleTimeline derived) {
+        mDerivedTimeline = derived;
+        installActiveTimeline();
+    }
+
+    /** The user's rule-segmentation switch; it only takes effect with a key, AI on and a translated mode. */
+    public void setRuleSegmentation(boolean enabled) {
+        mRuleSegmentation = enabled;
+        installActiveTimeline();
+    }
+
+    /** Supplies whether a key is configured; without one the native cues stay on screen. */
+    public void setTranslationAvailability(TranslationAvailability availability) {
+        mAvailability = availability;
+        installActiveTimeline();
+    }
+
+    /** True while derived sentences are the original text on screen (plan 4.3.6). */
+    public boolean isDerivedDisplayActive() {
+        return mDerivedTimeline != null && mRuleSegmentation && mController.isAiEnabled()
+                && mController.getDisplayMode() != SubtitleComposer.MODE_ORIGINAL_ONLY
+                && mAvailability != null && mAvailability.isAvailable();
+    }
+
+    /**
+     * Pushes the derived sentence of the position to the display without starting any network work.
+     * The caller drives this from the segment boundaries (never from the one-second prefetch tick, so
+     * a sentence cannot stay on screen after it ended).
+     */
+    public void refreshDerivedDisplay(long positionMs) {
+        if (!isDerivedDisplayActive()) {
+            dropDerivedDisplay();
+
+            return;
+        }
+
+        SubtitleFrame frame = mActiveTimeline != null ? mActiveTimeline.frameAt(positionMs * 1_000L) : null;
+        showDerivedFrame(frame);
+    }
+
+    /**
+     * Writes one derived sentence frame through the single display entry: the previous translations
+     * are dropped first, so no text of another sentence (or of the raw cue) can be composed onto it.
+     */
+    private void showDerivedFrame(SubtitleFrame frame) {
+        onFrameItems(frame != null ? frame.getItems() : Collections.<SubtitleItem>emptyList());
+
+        List<String> lines = new ArrayList<>();
+
+        if (frame != null) {
+            for (SubtitleItem item : frame.getItems()) {
+                lines.add(item.getText());
+            }
+        }
+
+        mDisplay.clearTranslations();
+        mDisplay.setDerivedOriginalLines(lines);
+        mDerivedApplied = true;
+        applyCurrentFrame();
+    }
+
+    /** Switches the display between derived sentences and the native cues in one place. */
+    private void installActiveTimeline() {
+        SubtitleTimeline active = isDerivedDisplayActive() ? mDerivedTimeline : mRawTimeline;
+        boolean timelineChanged = active != mActiveTimeline;
+        mActiveTimeline = active;
+
+        if (timelineChanged) {
+            // The tracked frame belonged to the previous timeline; until the next tick recomputes it,
+            // a stray repaint must not write cache entries of an unrelated frame.
+            onFrameItems(null);
+        }
 
         if (mDispatcher != null) {
-            mDispatcher.setTimeline(timeline);
+            mDispatcher.setTimeline(active);
         }
+
+        if (!isDerivedDisplayActive()) {
+            dropDerivedDisplay();
+        }
+    }
+
+    /** Hands the screen back to the native cue path, which is buffered in the display. */
+    private void dropDerivedDisplay() {
+        if (!mDerivedApplied) {
+            return;
+        }
+
+        mDerivedApplied = false;
+        mDisplay.clearTranslations();
+        mDisplay.setDerivedOriginalLines(null); // the buffered native text appears immediately
     }
 
     /**
@@ -294,7 +408,17 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
      * a different immutable timeline, so the already started export keeps its own snapshot.
      */
     public SubtitleTimeline getTimeline() {
-        return mTimeline;
+        return mRawTimeline;
+    }
+
+    /** The timeline the display and the prefetch consume (raw, or the derived sentences). */
+    public SubtitleTimeline getActiveTimeline() {
+        return mActiveTimeline;
+    }
+
+    /** The rule-segmented sentences of the current source, or null when the rule is off or refused. */
+    public SubtitleTimeline getDerivedTimeline() {
+        return mDerivedTimeline;
     }
 
     /**
@@ -309,8 +433,8 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
     public SubtitleTimeline getTimelineOfCurrentSource() {
         String currentKey = mController.getActiveSourceKey();
 
-        return mTimeline != null && currentKey != null && currentKey.equals(mTimelineSourceKey)
-                ? mTimeline
+        return mRawTimeline != null && currentKey != null && currentKey.equals(mTimelineSourceKey)
+                ? mRawTimeline
                 : null;
     }
 
@@ -355,8 +479,14 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
 
         // Track which items the frame on screen shows, so a cached translation can be written to the
         // right slot; the timeline is in microseconds, like the dispatcher.
-        if (mTimeline != null) {
-            SubtitleFrame frame = mTimeline.frameAt(positionMs * 1_000L);
+        SubtitleFrame frame = mActiveTimeline != null
+                ? mActiveTimeline.frameAt(positionMs * 1_000L) : null;
+
+        if (isDerivedDisplayActive()) {
+            // The boundary ticker drives the precise updates; this keeps the safety net in step, so a
+            // missed wakeup can never leave the previous sentence on screen for the whole video.
+            showDerivedFrame(frame);
+        } else {
             onFrameItems(frame != null ? frame.getItems() : Collections.<SubtitleItem>emptyList());
         }
 

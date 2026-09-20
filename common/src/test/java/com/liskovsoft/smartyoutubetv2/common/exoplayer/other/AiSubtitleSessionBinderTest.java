@@ -10,7 +10,9 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /** T05 acceptance for the player-event to session mapping. */
@@ -25,6 +27,7 @@ public class AiSubtitleSessionBinderTest {
     private static class RecordingDisplay implements SubtitleDisplay {
         private final List<String> actions = new ArrayList<>();
         private List<String> translations = Collections.emptyList();
+        private List<String> derivedLines;
 
         @Override
         public void setTranslations(List<String> values) {
@@ -46,6 +49,12 @@ public class AiSubtitleSessionBinderTest {
         @Override
         public void resetOriginalCueState() {
             actions.add("reset");
+        }
+
+        @Override
+        public void setDerivedOriginalLines(List<String> lines) {
+            derivedLines = lines == null ? null : new ArrayList<>(lines);
+            actions.add(lines == null ? "derived:off" : "derived:on");
         }
     }
 
@@ -360,6 +369,90 @@ public class AiSubtitleSessionBinderTest {
 
         assertEquals("blank entries are failures, not visible translations",
                 1, mBinder.getLastAppliedTranslationCount());
+    }
+
+    private static SubtitleTimeline ruleTimeline() {
+        List<SubtitleFrame> frames = new ArrayList<>();
+        frames.add(new SubtitleFrame(0, 1_000_000L,
+                Collections.singletonList(new SubtitleItem("a", "Hello"))));
+        frames.add(new SubtitleFrame(1_000_000L, 2_000_000L,
+                Collections.singletonList(new SubtitleItem("b", "World."))));
+
+        return new SubtitleTimeline(frames, "fp");
+    }
+
+    private SubtitleTimeline activateDerived(SubtitleTimeline raw) {
+        SubtitleRuleSegmenter.Result segmented = new SubtitleRuleSegmenter().segment(raw, "en");
+
+        mBinder.setTranslationCache(new SubtitleTranslationCache());
+        mBinder.setTimeline(raw);
+        mBinder.setRuleSegmentation(true);
+        mBinder.setTranslationAvailability(() -> true);
+        mBinder.setDerivedTimeline(segmented.getTimeline());
+        mBinder.onAiEnabled(true);
+        mBinder.onDisplayMode(SubtitleComposer.MODE_BILINGUAL);
+        mBinder.refreshDerivedDisplay(0);
+
+        return segmented.getTimeline();
+    }
+
+    @Test
+    public void derivedSentencesBecomeTheOriginalTextWhenTheWholeChainIsReady() {
+        mBinder.onVideoLoaded();
+        SubtitleTimeline raw = ruleTimeline();
+        SubtitleTimeline derived = activateDerived(raw);
+
+        assertTrue(mBinder.isDerivedDisplayActive());
+        assertEquals(Collections.singletonList("Hello World."), mDisplay.derivedLines);
+        assertSame("the export still uses the raw snapshot", raw, mBinder.getTimeline());
+        assertSame("the display and prefetch use the sentences", derived, mBinder.getActiveTimeline());
+        assertEquals("the prefetch unit is the sentence id",
+                new SubtitleRuleSegmenter().segment(raw, "en").getSegments().get(0).getSegmentId(),
+                mBinder.getCurrentFrameItems().get(0).getItemId());
+    }
+
+    @Test
+    public void theNativeTextIsRestoredAsSoonAsTheChainIsNotReady() {
+        mBinder.onVideoLoaded();
+        activateDerived(ruleTimeline());
+
+        assertNotNull(mDisplay.derivedLines);
+
+        mBinder.onAiEnabled(false);
+
+        assertFalse(mBinder.isDerivedDisplayActive());
+        assertNull("AI off hands the screen back to the native cues", mDisplay.derivedLines);
+
+        mBinder.onAiEnabled(true);
+        mBinder.onDisplayMode(SubtitleComposer.MODE_BILINGUAL);
+        mBinder.refreshDerivedDisplay(0);
+
+        assertNotNull(mDisplay.derivedLines);
+
+        mBinder.setTranslationAvailability(() -> false); // no key configured
+
+        assertNull("without a key the native cues stay on screen", mDisplay.derivedLines);
+    }
+
+    @Test
+    public void theOriginalOnlyModeKeepsTheNativeCues() {
+        mBinder.onVideoLoaded();
+        activateDerived(ruleTimeline());
+
+        mBinder.onDisplayMode(SubtitleComposer.MODE_ORIGINAL_ONLY);
+
+        assertFalse(mBinder.isDerivedDisplayActive());
+        assertNull(mDisplay.derivedLines);
+    }
+
+    @Test
+    public void aSeekDropsTheSentenceImmediately() {
+        mBinder.onVideoLoaded();
+        activateDerived(ruleTimeline());
+
+        mBinder.onSeekEnd();
+
+        assertNull("the sentence of the old position must not stay on screen", mDisplay.derivedLines);
     }
 
     @Test

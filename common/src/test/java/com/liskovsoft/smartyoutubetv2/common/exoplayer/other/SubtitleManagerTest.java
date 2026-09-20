@@ -51,6 +51,34 @@ public class SubtitleManagerTest {
         }
     }
 
+    @Test
+    public void derivedSentenceLinesOwnTheScreenAndNativeCuesStayBuffered() {
+        mManager.onCues(cues("native one"));
+
+        mManager.setDerivedOriginalLines(Collections.singletonList("Merged sentence."));
+
+        assertEquals(Collections.singletonList("Merged sentence."), mSink.lastWrite());
+
+        // A native cue that arrives while the derived sentence is on screen must not replace it.
+        mManager.onCues(cues("native two"));
+
+        assertEquals("the merged sentence stays on screen",
+                Collections.singletonList("Merged sentence."), mSink.lastWrite());
+
+        mManager.setDerivedOriginalLines(null);
+
+        assertEquals("the newest native text appears immediately",
+                Collections.singletonList("native two"), mSink.lastWrite());
+    }
+
+    @Test
+    public void anEmptyDerivedFrameClearsTheSentence() {
+        mManager.setDerivedOriginalLines(Collections.singletonList("Merged sentence."));
+        mManager.setDerivedOriginalLines(Collections.<String>emptyList());
+
+        assertEquals(Collections.<String>emptyList(), mSink.lastWrite());
+    }
+
     private static List<Cue> cues(String... texts) {
         List<Cue> result = new ArrayList<>();
 

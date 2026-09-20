@@ -40,6 +40,10 @@ public final class SubtitleExportBundle {
     public static final String FILE_TRANSLATED = "translated.srt";
     public static final String FILE_BILINGUAL = "bilingual.srt";
     public static final String FILE_UNTRANSLATED = "untranslated.srt";
+    /** Rule-segmented sentences: they never replace the raw files, they are added next to them. */
+    public static final String FILE_SEGMENTED_ORIGINAL = "segmented-original.srt";
+    public static final String FILE_SEGMENTED_TRANSLATED = "segmented-translated.srt";
+    public static final String FILE_SEGMENTED_BILINGUAL = "segmented-bilingual.srt";
     public static final String FILE_STATUS = "translation-status.txt";
     public static final String FILE_README = "README.txt";
     public static final String FILE_NAME_PREFIX = "SmartTube-subtitles-";
@@ -153,6 +157,25 @@ public final class SubtitleExportBundle {
                         SubtitleSrtFormatter.formatUntranslated(timeline, translations).getBytes(UTF_8), entries, modifiedMs);
             }
 
+            SubtitleTimeline segmented = snapshot.getSegmentedTimeline();
+
+            if (segmented != null && !segmented.isEmpty()) {
+                // The derived sentences are an extra view of the same subtitles (plan 4.3.8): the raw
+                // files above stay untouched and keep their own item ids.
+                SubtitleSrtFormatter.Coverage segmentedCoverage = SubtitleSrtFormatter.measure(segmented, translations);
+                put(zip, FILE_SEGMENTED_ORIGINAL,
+                        SubtitleSrtFormatter.formatOriginal(segmented).getBytes(UTF_8), entries, modifiedMs);
+
+                if (segmentedCoverage.getTranslatedItems() > 0) {
+                    put(zip, FILE_SEGMENTED_TRANSLATED,
+                            SubtitleSrtFormatter.formatTranslated(segmented, translations).getBytes(UTF_8),
+                            entries, modifiedMs);
+                    put(zip, FILE_SEGMENTED_BILINGUAL,
+                            SubtitleSrtFormatter.formatBilingual(segmented, translations).getBytes(UTF_8),
+                            entries, modifiedMs);
+                }
+            }
+
             put(zip, FILE_STATUS, statusNote(snapshot, coverage, failedItems, notAttemptedItems).getBytes(UTF_8),
                     entries, modifiedMs);
             put(zip, FILE_README, readme(snapshot, coverage, failedItems, notAttemptedItems).getBytes(UTF_8),
@@ -215,6 +238,16 @@ public final class SubtitleExportBundle {
      * were never reached", and it keeps working when the run was interrupted: such cues simply stay
      * {@code NOT_ATTEMPTED} instead of being presented as translated.
      */
+    /** One line about the rule-segmented files, so a reader knows why they are (not) present. */
+    static String segmentedNote(SubtitleExportSnapshot snapshot) {
+        SubtitleTimeline segmented = snapshot != null ? snapshot.getSegmentedTimeline() : null;
+
+        return segmented == null || segmented.isEmpty()
+                ? "Rule segmentation was off at export time: no segmented-*.srt file is included."
+                : "segmented-*.srt: the same subtitles merged into rule-based sentences ("
+                + segmented.size() + " frames); the raw files keep the original cue boundaries.";
+    }
+
     static String statusNote(SubtitleExportSnapshot snapshot, SubtitleSrtFormatter.Coverage coverage,
                              int failedItems, int notAttemptedItems) {
         SubtitleExportSnapshot.Session session = snapshot.getSession();
@@ -311,6 +344,7 @@ public final class SubtitleExportBundle {
                 .append(" = original above translation; ").append(FILE_UNTRANSLATED)
                 .append(" = only the cues still without a translation; ").append(FILE_STATUS)
                 .append(" = per-cue state (TRANSLATED / FAILED / NOT_ATTEMPTED).").append(EOL);
+        out.append(segmentedNote(snapshot)).append(EOL);
         out.append("This export does not need the AI switch or an API key, and works with an interrupted or failed translation run. / \u672c\u5bfc\u51fa\u4e0d\u9700\u8981 AI \u5f00\u5173\u6216 API Key\uff0c\u7ffb\u8bd1\u88ab\u4e2d\u65ad\u6216\u5931\u8d25\u65f6\u4e5f\u80fd\u5bfc\u51fa\u3002").append(EOL);
 
         if (coverage.getTranslatedItems() == 0) {

@@ -261,6 +261,8 @@ public final class SubtitleExportSnapshot {
     private final Session mSession;
     private final Counters mCounters;
     private final SubtitleTimeline mTimeline;
+    /** Rule-segmented sentences of the same click-time snapshot, or null when the rule was off. */
+    private final SubtitleTimeline mSegmentedTimeline;
     private final Map<String, String> mTranslations;
     private final Map<String, String> mTranslationStatus;
     private final List<String> mEvents;
@@ -274,11 +276,24 @@ public final class SubtitleExportSnapshot {
     public SubtitleExportSnapshot(long createdAtMs, Source source, Session session, Counters counters,
                                   SubtitleTimeline timeline, Map<String, String> translations,
                                   Map<String, String> translationStatus, List<String> events) {
+        this(createdAtMs, source, session, counters, timeline, null, translations, translationStatus, events);
+    }
+
+    /**
+     * @param segmentedTimeline rule-segmented sentences derived from {@code timeline} at click time, or
+     *                          null when rule segmentation was off; the raw timeline stays the source of
+     *                          {@code original.srt} either way
+     */
+    public SubtitleExportSnapshot(long createdAtMs, Source source, Session session, Counters counters,
+                                  SubtitleTimeline timeline, SubtitleTimeline segmentedTimeline,
+                                  Map<String, String> translations, Map<String, String> translationStatus,
+                                  List<String> events) {
         mCreatedAtMs = createdAtMs;
         mSource = source != null ? source : Source.none();
         mSession = session != null ? session : Session.idle();
         mCounters = counters != null ? counters : Counters.empty();
         mTimeline = timeline;
+        mSegmentedTimeline = segmentedTimeline;
         mTranslations = translations == null
                 ? Collections.<String, String>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(translations));
@@ -310,6 +325,11 @@ public final class SubtitleExportSnapshot {
     /** The timeline of the source bound at click time, or null when none was obtained yet. */
     public SubtitleTimeline getTimeline() {
         return mTimeline;
+    }
+
+    /** Rule-segmented sentences of the same source, or null when the rule was off at click time. */
+    public SubtitleTimeline getSegmentedTimeline() {
+        return mSegmentedTimeline;
     }
 
     /** Immutable copy of the successful translations known at click time. */

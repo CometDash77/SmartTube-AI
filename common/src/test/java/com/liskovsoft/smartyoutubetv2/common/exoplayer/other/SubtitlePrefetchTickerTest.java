@@ -47,6 +47,19 @@ public class SubtitlePrefetchTickerTest {
     private int mTicks;
     private SubtitlePrefetchTicker mTicker;
 
+    @Test
+    public void aCustomIntervalDrivesTheSameSingleCallbackClock() {
+        SubtitlePrefetchTicker ticker = new SubtitlePrefetchTicker(mScheduler, () -> mTicks++,
+                SubtitlePrefetchTicker.DERIVED_DISPLAY_INTERVAL_MS);
+
+        ticker.start();
+        ticker.start();
+
+        assertEquals("one pending callback", 1, mScheduler.pendingCount());
+        assertEquals(SubtitlePrefetchTicker.DERIVED_DISPLAY_INTERVAL_MS,
+                mScheduler.delays.get(0).longValue());
+    }
+
     @Before
     public void setUp() {
         mScheduler = new FakeScheduler();

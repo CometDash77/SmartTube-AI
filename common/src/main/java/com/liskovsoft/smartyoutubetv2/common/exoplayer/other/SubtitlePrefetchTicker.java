@@ -10,6 +10,11 @@ package com.liskovsoft.smartyoutubetv2.common.exoplayer.other;
  */
 public class SubtitlePrefetchTicker {
     public static final long INTERVAL_MS = 1_000;
+    /**
+     * Bounded display check of rule-derived sentences (plan 4.3.7). Precise boundary scheduling is
+     * preferred; this bounded check is the documented fallback and stays apart from the network work.
+     */
+    public static final long DERIVED_DISPLAY_INTERVAL_MS = 100;
 
     /** Scheduler seam of the player (for example the existing Handler/Utils helpers). */
     public interface Scheduler {
@@ -25,11 +30,25 @@ public class SubtitlePrefetchTicker {
     private final Scheduler mScheduler;
     private final Tick mTick;
     private final Runnable mTask = this::runTick;
+    private final long mIntervalMs;
     private boolean mRunning;
 
     public SubtitlePrefetchTicker(Scheduler scheduler, Tick tick) {
+        this(scheduler, tick, INTERVAL_MS);
+    }
+
+    /**
+     * The same one-pending-callback clock with another interval. The derived-sentence display uses a
+     * bounded 100 ms check (plan 4.3.7), deliberately apart from the one-second network prefetch.
+     */
+    public SubtitlePrefetchTicker(Scheduler scheduler, Tick tick, long intervalMs) {
         mScheduler = scheduler;
         mTick = tick;
+        mIntervalMs = intervalMs > 0 ? intervalMs : INTERVAL_MS;
+    }
+
+    public long getIntervalMs() {
+        return mIntervalMs;
     }
 
     /** Starts the periodic checks; a second start while running is ignored. */
@@ -39,7 +58,7 @@ public class SubtitlePrefetchTicker {
         }
 
         mRunning = true;
-        mScheduler.postDelayed(mTask, INTERVAL_MS);
+        mScheduler.postDelayed(mTask, mIntervalMs);
     }
 
     /** Stops the periodic checks and removes the pending callback. */
@@ -69,7 +88,7 @@ public class SubtitlePrefetchTicker {
         }
 
         if (mRunning) {
-            mScheduler.postDelayed(mTask, INTERVAL_MS);
+            mScheduler.postDelayed(mTask, mIntervalMs);
         }
     }
 }

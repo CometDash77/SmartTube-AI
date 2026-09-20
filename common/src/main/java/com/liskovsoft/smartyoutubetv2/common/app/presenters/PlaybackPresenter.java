@@ -10,10 +10,12 @@ import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleConnectionT
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleTranslationClient;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleHandlerScheduler;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitlePrefetchLoop;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitlePrefetchTicker;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SelectedSubtitleSource;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSnapshotFetcher;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSourceBinder;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleLoadNoticeDelivery;
+import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleRuleSegmenter;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleSessionContext;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleAiSettings;
 import com.liskovsoft.smartyoutubetv2.common.exoplayer.other.SubtitleFrame;
@@ -111,6 +113,9 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     private SubtitleTranslationClient.Cancellable mAiConnectionTestCall;
     private boolean mIsAiSubtitleChainReady;
     private SubtitlePrefetchLoop mAiLoop;
+    /** Bounded 100 ms derived-sentence display check, separate from the one-second prefetch loop. */
+    private SubtitlePrefetchTicker mAiDerivedTicker;
+    private final SubtitleRuleSegmenter mAiSegmenter = new SubtitleRuleSegmenter();
     private ExecutorService mAiSnapshotExecutor;
     /** Owns the request identity of the one timeline read per source (task N1). */
     private SubtitleTimelineCoordinator mAiTimeline;
@@ -528,6 +533,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         mAiSessionContext = new SubtitleSessionContext();
         mAiSubtitleBinder.setTranslationCache(mAiTranslationCache);
         mAiSubtitleBinder.setSessionContext(mAiSessionContext);
+        mAiSubtitleBinder.setTranslationAvailability(
+                () -> mAiSettings != null && mAiSettings.isKeyConfigured());
         mAiSubtitleBinder.installDispatcher(mAiDispatcher);
         mAiSubtitleBinder.setTranslationDisplayListener(() -> {
             syncAiLoadNotificationIdentity();
@@ -571,6 +578,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         cancelAiSubtitleSummary();
         mAiSummarySession.reset();
         maybeAnalyzeAiSubtitleContext();
+        syncRuleSegmentation(); // the rule switch or its version is part of the new configuration
 
         if (mAiLoop != null && mAiSettings != null && mAiSettings.getSettings().isEnabled()
                 && mAiSettings.isKeyConfigured()) {
@@ -640,6 +648,72 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
                                 maybeAnalyzeAiSubtitleContext();
                             }
                         }));
+    }
+
+    /**
+     * Rule segmentation (Kiss feature, plan 4.3): recomputes the derived sentences of the current
+     * source and hands them to the session. The switch only takes effect together with a key, AI on
+     * and a translated display mode; otherwise the binder keeps the native cues on screen.
+     */
+    private void syncRuleSegmentation() {
+        AiSubtitleSessionBinder binder = mAiSubtitleBinder;
+
+        if (binder == null || mAiSettings == null) {
+            return;
+        }
+
+        boolean enabled = mAiSettings.getSettings().usesRuleSegmentation();
+        binder.setRuleSegmentation(enabled);
+
+        SubtitleTimeline raw = binder.getTimeline();
+
+        if (!enabled || raw == null || raw.isEmpty()) {
+            binder.setDerivedTimeline(null);
+            refreshAiDerivedDisplay();
+            return;
+        }
+
+        SubtitleRuleSegmenter.Result result = mAiSegmenter.segment(raw, binder.getActiveSourceLanguage());
+
+        if (result.isDerived()) {
+            mAiEvents.add("SEGMENTED_OK");
+        } else {
+            mAiEvents.add("SEGMENTED_" + result.getFallback());
+        }
+
+        binder.setDerivedTimeline(result.isDerived() ? result.getTimeline() : null);
+        refreshAiDerivedDisplay();
+    }
+
+    /**
+     * Pushes the derived sentence of the current position to the display and keeps the bounded
+     * display check running only while derived sentences are really on screen (plan 4.3.7).
+     */
+    private void refreshAiDerivedDisplay() {
+        AiSubtitleSessionBinder binder = mAiSubtitleBinder;
+
+        if (binder == null) {
+            return;
+        }
+
+        binder.refreshDerivedDisplay(currentPositionMs());
+
+        if (mAiDerivedTicker == null) {
+            mAiDerivedTicker = new SubtitlePrefetchTicker(new SubtitleHandlerScheduler(),
+                    this::refreshAiDerivedDisplay, SubtitlePrefetchTicker.DERIVED_DISPLAY_INTERVAL_MS);
+        }
+
+        if (binder.isDerivedDisplayActive()) {
+            mAiDerivedTicker.start();
+        } else {
+            mAiDerivedTicker.stop();
+        }
+    }
+
+    private long currentPositionMs() {
+        PlaybackView player = mPlayer.get();
+
+        return player != null ? player.getPositionMs() : 0;
     }
 
     /** Abandons a prepared context analysis (video, source, configuration change, release). */
@@ -989,6 +1063,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             // Includes the reused install: the timeline is in place for the current source afterwards.
             mAiTimelineInstalls++;
             maybeAnalyzeAiSubtitleContext(); // the sample needs the timeline of this source
+            syncRuleSegmentation(); // derived sentences need the snapshot of this source
         }
 
         mAiEvents.add((accepted ? "SNAPSHOT_" : "SNAPSHOT_STALE_") + status);
@@ -1123,6 +1198,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             mAiLoop.start();
             requestAiSubtitleTimeline(); // prepare the timeline of the source already selected
             maybeAnalyzeAiSubtitleContext(); // the enhanced tier analyses once, before the first batch
+            syncRuleSegmentation();
         } else {
             // Turning translation off must not discard the original timeline: the local export works
             // without the AI switch and an in-flight snapshot is a plain subtitle read, not a paid call.
@@ -1141,6 +1217,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     public void applyAiDisplayMode(int mode) {
         if (mAiSubtitleBinder != null) {
             mAiSubtitleBinder.onDisplayMode(mode);
+            syncRuleSegmentation(); // "original only" uses the native cues again
         }
     }
 
@@ -1342,6 +1419,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         Map<String, String> translations = cache != null ? cache.snapshot() : Collections.<String, String>emptyMap();
         Map<String, String> translationStatus = cache != null ? cache.statusSnapshot() : Collections.<String, String>emptyMap();
         SubtitleTimeline timeline = binder != null ? binder.getTimelineOfCurrentSource() : null;
+        // The derived sentences are exported next to the raw ones, never instead of them (plan 4.3.8).
+        SubtitleTimeline segmentedTimeline = binder != null ? binder.getDerivedTimeline() : null;
         SubtitleExportSnapshot.Counters counters = new SubtitleExportSnapshot.Counters(
                 mAiStats.getRequests(), mAiStats.getDeliveredItems(), mAiStats.getFailedBatches(),
                 mAiStats.getCancelledBatches(), translations.size(), cache != null ? cache.getBytes() : 0,
@@ -1351,7 +1430,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         return new SubtitleExportSnapshot(System.currentTimeMillis(), source,
                 new SubtitleExportSnapshot.Session(aiEnabled, keyConfigured, displayMode, targetLanguage,
                         mAiSnapshotStatus, mAiTimelineRequestResult, requestInFlight),
-                counters, timeline, translations, translationStatus, mAiEvents.snapshot());
+                counters, timeline, segmentedTimeline, translations, translationStatus, mAiEvents.snapshot());
     }
 
     /**
@@ -1411,6 +1490,11 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             mAiLoop = null;
         }
 
+        if (mAiDerivedTicker != null) {
+            mAiDerivedTicker.stop(); // the derived display check is a timer too
+            mAiDerivedTicker = null;
+        }
+
         mIsAiSubtitleChainReady = false;
 
         mAiSubtitlesVisible = null; // a rebuilt engine reports its visibility again
@@ -1430,11 +1514,19 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
     @Override
     public void onPlay() {
+        if (mAiSubtitleBinder != null && mAiSubtitleBinder.isDerivedDisplayActive() && mAiDerivedTicker != null) {
+            mAiDerivedTicker.start(); // the clock paused with playback; resume the display check
+        }
+
         process(PlayerEventListener::onPlay);
     }
 
     @Override
     public void onPause() {
+        if (mAiDerivedTicker != null) {
+            mAiDerivedTicker.stop(); // a paused video has no boundary to catch up with
+        }
+
         process(PlayerEventListener::onPause);
     }
 
@@ -1454,6 +1546,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
 
         if (subtitles != null) {
             subtitles.onSeekEnd(); // clear stale translations and drop the carried original text
+            refreshAiDerivedDisplay(); // the sentence of the new position appears immediately
         }
 
         // The timeline covers the whole source and survives a seek, so an attempt that is already

@@ -29,10 +29,11 @@
 | 功能 | 状态 | 证据 | 仍缺 |
 | --- | --- | --- | --- |
 | 字幕加载通知 | **自动验证通过** | `SubtitleLoadNotificationPolicyTest`、`SubtitleLoadNoticeDeliveryTest`、内容事务与显示事件回归 | 遥控器焦点/遮挡与真机文案；关闭开关后的实际提示消失行为 |
+| 规则断句导出 | **已实现**（raw 不变，规则开时额外写 segmented-original/-translated/-bilingual.srt，README 说明） | 见上一行测试 | 设备端打开 ZIP 核对内容与画面一致 |
 | 智能上下文（三档） | **连通，档位真正影响请求** | `SubtitleContextPayloadTest`（基础不含译例/摘要、连贯含译例、增强含摘要、空数据不产生空字段）、`SubtitleBatchPlannerTest.neighboursComeFromTheWholeTimelineInTimeOrder`、`SubtitleSessionContextTest`（8 条） | 上下文"准确率提升"；真实样本对照；设备首译延迟 |
 | 视频增强一次性摘要 | **实现并接线（compile + 单测）** | `SubtitleSummaryParserTest`、`SubtitleSummaryAnalyzerTest`（9 条：单次、上限、超时、迟到、失败不重试）、`SubtitleSummarySessionTest`（4 条） | 真实服务下的 5s 预算表现；摘要质量的设备评估 |
 | 强制重翻 | **实现并接线（compile + 单测）** | `SubtitleRetranslationTest`（4 条：成功项也重新请求、旧代次迟到被丢弃、摘要保留而译例清空、AI 关/无来源拒绝） | presenter 结果枚举与菜单回执的真机确认；连续点击与 429 的实际手感 |
-| 规则断句 | **未实施（仅设置项与身份已落地）** | 三档/开关的存储与 namespace 自 K1 起存在；无 segmenter、无派生时间轴、无派生显示/导出 | 整个 K4/K5 链路（算法、稳定来源映射、局部回退、原子显示、派生导出） |
+| 规则断句 | **已实现并本地验证，待设备验收**（本节记录 nightly-25 时点后的增量） | `SubtitleRuleSegmenterTest` 17 条（边界、上限、回退、来源映射）、`AiSubtitleSessionBinderTest` +4（派生生效与立即回退）、`SubtitleManagerTest` +2（单一写入入口）、`SubtitleExportBundleTest` +2（raw + segmented 共存）、`SubtitlePrefetchTickerTest` +1；整模块 68 suites / 555 tests / 0 failures | 边界时差（目标 ≤200ms，当前为有界 100ms 检查而非边界单次唤醒）、真机长句拆分与清屏观感、`segmented-*.srt` 在电视文件管理器中的可见性 |
 
 ## 4. 已执行的验证（本地，非 CI）
 

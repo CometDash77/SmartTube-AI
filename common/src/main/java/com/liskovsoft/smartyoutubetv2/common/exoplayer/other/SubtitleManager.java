@@ -34,6 +34,8 @@ public class SubtitleManager implements TextOutput, OnDataChange, SubtitleDispla
     private final SubtitleComposer mSubtitleComposer = new SubtitleComposer();
     private final CueSink mCueSink;
     private List<CharSequence> mCurrentOriginalTexts = new ArrayList<>();
+    /** Derived sentence lines of the frame on screen, or null while the native cue path owns it. */
+    private List<String> mDerivedOriginalLines;
 
     /** The only way this manager hands subtitles to a view; injectable for tests. */
     interface CueSink {
@@ -95,8 +97,31 @@ public class SubtitleManager implements TextOutput, OnDataChange, SubtitleDispla
         }
 
         mCurrentOriginalTexts = texts;
-        mSubtitleComposer.setOriginalLines(toStrings(texts));
+
+        if (mDerivedOriginalLines == null) {
+            mSubtitleComposer.setOriginalLines(toStrings(texts));
+            renderCurrent();
+        }
+        // While a derived sentence frame is on screen the native text is only buffered: rendering it
+        // would replace the merged sentence with a raw cue fragment (plan 4.3.6).
+    }
+
+    /**
+     * Shows the derived (rule-segmented) sentence of the frame on screen, or hands the screen back to
+     * the native cue path when null. The buffered native text is kept either way, so a fallback is
+     * immediate and never shows an empty frame.
+     */
+    @Override
+    public void setDerivedOriginalLines(List<String> lines) {
+        mDerivedOriginalLines = lines == null ? null : new ArrayList<>(lines);
+        mSubtitleComposer.setOriginalLines(mDerivedOriginalLines != null
+                ? new ArrayList<>(mDerivedOriginalLines) : toStrings(mCurrentOriginalTexts));
         renderCurrent();
+    }
+
+    /** True while a derived sentence frame owns the screen (diagnostics and tests). */
+    public boolean hasDerivedOriginalLines() {
+        return mDerivedOriginalLines != null;
     }
 
     /** Translations aligned to the current frame's cue slots; missing entries are null. */

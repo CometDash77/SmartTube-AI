@@ -260,7 +260,7 @@ seek 保留同源摘要和可复用译文、清连贯历史；seek 打断尚未�
 
 基线：nightly-25（SHA `6c70e370`）已通过用户测试；已实现行为清单见当天[进度记录](../../development/2026-09-20.md)。按优先级：
 
-1. **K4/K5 规则断句整条链路（最高优先，当前可见缺口）**：`SubtitleRuleSegmenter`（保守 native 边界合并、稳定来源映射、局部回退与 `LONG_UNSPLIT` 计数）、派生时间轴（`segmentId / memberItemIds / startUs / endUs / sourceText / ruleVersion`）、planner 选择 raw/derived、单一显示入口的原子替换（派生原文与译文同帧）、边界驱动显示更新（不以 1s 预取 tick 冒充）、导出 `segmented-original/translated/bilingual.srt`。在该链路完成前，菜单里的断句开关不得表现为已生效（隐藏或明确标注，随 K4/K5 一并解决）。
+1. **K4/K5 规则断句整条链路（最高优先）——已完成代码与本地验证，待设备验收**（`SubtitleRuleSegmenter` + 派生时间轴 + 显示原子替换 + 有界 100ms 显示检查 + `segmented-*.srt` 导出；细节与仍缺项见当天记录）。原计划措辞保留如下：`SubtitleRuleSegmenter`（保守 native 边界合并、稳定来源映射、局部回退与 `LONG_UNSPLIT` 计数）、派生时间轴（`segmentId / memberItemIds / startUs / endUs / sourceText / ruleVersion`）、planner 选择 raw/derived、单一显示入口的原子替换（派生原文与译文同帧）、边界驱动显示更新（不以 1s 预取 tick 冒充）、导出 `segmented-original/translated/bilingual.srt`。在该链路完成前，菜单里的断句开关不得表现为已生效（隐藏或明确标注，随 K4/K5 一并解决）。
 2. **设备侧补齐**：真实 Key 的一次最小付费调用（需用户授权）、遥控器焦点与首译延迟、权限拒绝/空间不足提示。
 3. **改进类**：诊断增量（重翻次数、上下文档位与摘要结果码、派生段数/回退计数、各操作耗时与请求数）；通知文案与提示时长微调；缓存与窗口参数按实测调整；导出译文形态核对。
 4. **发布通道**：配置 4 个签名 Secrets（`SIGNING_KEY / KEY_STORE_PASSWORD / ALIAS / KEY_PASSWORD`）→ `release_mode=true` 产出项目签名 RC，使后续候选可覆盖升级（当前 debug 回退候选每次签名不同，必须先卸载）。

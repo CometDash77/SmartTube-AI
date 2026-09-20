@@ -41,6 +41,58 @@ public class SubtitleExportBundleTest {
                 timeline, translations, status, Collections.<String>emptyList());
     }
 
+    private static SubtitleExportSnapshot snapshot(SubtitleTimeline timeline, SubtitleTimeline segmented,
+                                                   Map<String, String> translations) {
+        return new SubtitleExportSnapshot(1_700_000_000_000L,
+                new SubtitleExportSnapshot.Source(SubtitleExportSnapshot.PlayerReadiness.READY, true,
+                        SubtitleSourceBinder.Status.BOUND, "dash", "text/vtt", "en", "a.en", true),
+                new SubtitleExportSnapshot.Session(true, true, SubtitleComposer.MODE_BILINGUAL, "zh-Hans", "OK"),
+                new SubtitleExportSnapshot.Counters(2, 2, 1, 0, translations != null ? translations.size() : 0, 32),
+                timeline, segmented, translations, Collections.<String, String>emptyMap(),
+                Collections.<String>emptyList());
+    }
+
+    private static SubtitleTimeline segmented() {
+        return new SubtitleTimeline(Collections.singletonList(
+                new SubtitleFrame(0, 2_000_000, Collections.singletonList(
+                        new SubtitleItem("seg-1", "One Two")))), "fp-r1");
+    }
+
+    @Test
+    public void ruleSegmentedSentencesAreAddedNextToTheRawFiles() throws IOException {
+        Map<String, String> translations = new LinkedHashMap<>();
+        translations.put("seg-1", "\u4e00\u4e8c");
+
+        SubtitleExportBundle.Result result = SubtitleExportBundle.build(
+                snapshot(timeline(), segmented(), translations));
+
+        assertTrue(result.isSuccess());
+
+        Map<String, String> entries = unzip(result.getBytes());
+
+        assertTrue("the raw files stay", entries.containsKey(SubtitleExportBundle.FILE_ORIGINAL));
+        assertTrue(entries.containsKey(SubtitleExportBundle.FILE_SEGMENTED_ORIGINAL));
+        assertTrue(entries.containsKey(SubtitleExportBundle.FILE_SEGMENTED_TRANSLATED));
+        assertTrue(entries.containsKey(SubtitleExportBundle.FILE_SEGMENTED_BILINGUAL));
+        assertTrue("the sentence is one cue of the derived file",
+                entries.get(SubtitleExportBundle.FILE_SEGMENTED_ORIGINAL).contains("One Two"));
+        assertTrue("the raw file keeps the original cue text",
+                entries.get(SubtitleExportBundle.FILE_ORIGINAL).contains("One"));
+        assertTrue(entries.get(SubtitleExportBundle.FILE_README).contains("segmented-*.srt"));
+    }
+
+    @Test
+    public void withoutTheRuleNoSegmentedFileIsWritten() throws IOException {
+        Map<String, String> translations = new LinkedHashMap<>();
+        translations.put("a", "Eins");
+
+        Map<String, String> entries = unzip(SubtitleExportBundle.build(
+                snapshot(timeline(), translations)).getBytes());
+
+        assertFalse(entries.containsKey(SubtitleExportBundle.FILE_SEGMENTED_ORIGINAL));
+        assertTrue(entries.get(SubtitleExportBundle.FILE_README).contains("Rule segmentation was off"));
+    }
+
     private static SubtitleTimeline timeline() {
         return new SubtitleTimeline(Arrays.asList(
                 new SubtitleFrame(0, 1_000_000, Arrays.asList(
