@@ -189,14 +189,14 @@ jobs:
             {
               echo "#### $name"
               echo ""
-              echo "```"
+              echo '```'
               if [ -x "$AAPT" ]; then
                 "$AAPT" dump badging "$apk" 2>/dev/null | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)" || true
               else
                 echo "aapt unavailable in this runner"
               fi
               "$APKSIGNER" verify --print-certs "$apk" | grep -E "SHA-256 digest|Signer #1 certificate DN" || true
-              echo "```"
+              echo '```'
               echo ""
             } >> NOTES.md
             "$APKSIGNER" verify --verbose --print-certs "$apk"
@@ -226,9 +226,9 @@ jobs:
             echo "- commit: $GITHUB_SHA"
             echo "- run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo ""
-            echo "```"
+            echo '```'
             cat SHA256SUMS.txt
-            echo "```"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK artifacts
