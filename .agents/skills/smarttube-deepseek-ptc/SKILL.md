@@ -35,6 +35,17 @@ This is a thin adapter over the shared project rules. It does not supersede the 
 - Do not recursively invoke `run_code`, leak credentials, or use PTC to authorize destructive or external actions.
 - For Android changes, preserve TV focus/remote behavior, shared checkout selection, JDK 17, and the checked-in Gradle wrapper from the shared project rules.
 
+## Measured harness limits and failure modes (2026-09-20 audit)
+
+Evidence and verdicts: `docs/research/agent-tool-use-audit-2026-09-20.md`. These are mechanics of this harness observed in a full session, not general advice.
+
+- **Model-visible output is capped and spilled.** Oversized results are truncated to a temp file; the audited session spilled 29 outputs (1.55 MB, 76% of it from `read`), which was the largest context cost of the whole session. Scope reads with `offset`/`limit`; filter command output only after failures are understood.
+- **A `read` registers the observation; other writers do not.** The edit tool refuses a file whose bytes changed after the last `read` (`file has not been read` / `file changed since it was read`). After any script, formatter or generator rewrites a file, read it again before editing.
+- **A `run_code` parse failure resends the whole program.** Keep quoted prose out of string literals (use 「」 or U+201C), never place a backtick inside a template literal, and build long texts by concatenation.
+- **`present` accepts 1–8 files**; split longer lists instead of retrying the same call.
+- **`job_output(wait)` can outlive the `run_code` deadline** (120 s default): shorten the wait or start long jobs in the background and poll.
+- **`write` to an existing path must follow a `read` of that path**; otherwise choose a new path.
+
 ## Model note
 
 DeepSeek's public API documentation documents tool calls, thinking/non-thinking requests, and beta strict JSON mode. It does not establish a public specification for a model named “DeepSeek V4.1 Flash” in this workspace. Therefore this skill avoids model-name branching and relies on the active deployment's actual tool/context behavior.

@@ -21,6 +21,19 @@
 - Route explicit skills and obvious build work directly. Use code for paths, shared-checkout selection, counts, versions, exit codes and artifact/signature checks; use Astra for research, implementation, complex reasoning and generation. Jev must not authorize actions, switch models/spawn agents, discard governing instructions, or certify task completion. Keep actual test and device evidence authoritative.
 - For Jev work, Astra first probes assumptions and decomposes broad judgments into precise, evidence-backed atomic questions (the skill's Grill-the-judgment method). Batch independent questions against the same state; sequence only genuine evidence dependencies. This is question design, not a mandatory user interview.
 
+## Tool-use hygiene (from the 2026-09-20 self-audit)
+
+Measured evidence and per-item verdicts: `docs/research/agent-tool-use-audit-2026-09-20.md` (40 atomic assertions, one live Jev audit). These are agent obligations, not runtime-enforced hooks.
+
+- **Scope reads before editing.** `grep` for the anchor, then read with `offset`/`limit`; read a large file in full only once, right before the edit that needs the observation guard. For progress and report files, read the structure and the newest section instead of the whole history — oversized reads were 76% of this session's truncated model-visible output.
+- **Decide line endings before the first edit.** Check `git ls-files --eol <path>`; write added lines as LF and never let an edit rewrite a file's overall line endings (that produced 89 fake changed lines once). Re-check with `git diff --check` and `git diff --numstat` after the first edit of a CRLF or mixed file.
+- **Re-read after any non-edit writer.** A script, formatter or generated log that rewrites a file invalidates the harness observation: read again before the next edit instead of assuming the file is unchanged.
+- **Copy `old_string` from the bytes just read.** Do not rebuild it from grep output, trimmed text or memory; indentation and CJK quote forms are part of the anchor.
+- **Read the whole failure, not the status line.** On a failed build or test, write the complete log to a file and read the diagnostics back (`\.java:\d+`, `error:`); never diagnose from a filtered BUILD line alone. Batch same-module edits into one verification wave instead of one build per small edit.
+- **Keep literals safe in code-executed tool programs.** Inside a PTC / `run_code` program, use 「」 or U+201C for quoted prose and never place a backtick inside a template literal; build strings by concatenation. A parse failure resends the whole program, so check quoting before sending.
+- **Stage explicitly.** Prefer explicit paths over `git add -A` in a shared workspace.
+- **Record the Jev decision.** In each implementation round, state whether a Jev batch was used and why not when it was skipped; a silent skip is not reviewable afterwards.
+
 ## DeepSeek Harness compatibility (secondary adapter)
 
 - Astra/Codex remains the primary workflow and source of truth. This section only exposes a compatible entry point for DeepSeek Harness; it does not replace or weaken the rules above.
