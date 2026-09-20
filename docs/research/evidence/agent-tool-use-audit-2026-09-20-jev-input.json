@@ -1,0 +1,77 @@
+{
+ "task": "审计本次 DeepSeek Harness 会话（Kiss 字幕 K1/K2 修复 → K3 上下文 → K6 重翻 → K4/K5 规则断句 → 自查修复 → 两轮候选验收）中的 tool use：哪些完全没必要、哪些是错误做法。每条只判断该断言是否被所给证据支持。",
+ "checks": [
+  {
+   "id": "read-full-dailyrecord",
+   "source": "session tool call: read docs/development/2026-09-20.md (no offset/limit); spill dsh-spill-l7VoNc/session-70e2499d6140/f8b445f7e985-run_code.txt",
+   "claim": "读取整份 662 行当天记录（一次 read 无 offset/limit）是满足「读最新进度文件」这一要求的最省方式。",
+   "evidence": "记录结构：前 5 个顶层小节（Scope/Progress/Verification/Outstanding/Next step）在 1-85 行，85-662 行是历史 round 条目。read 未带 offset/limit，返回被截断（Omitted 1701 bytes，落盘 f8b445f7e985-run_code.txt 50KB）。同目录 29 个 spill 文件中 read 占 22 个、1.18MB。"
+  },
+  {
+   "id": "normalizer-noop",
+   "source": "session pwsh calls: python -B tmp/normalize-line-endings.py <file>",
+   "claim": "对 blob 为 LF-only 的文件运行行尾归一化脚本会产生有效信息，因此值得执行。",
+   "evidence": "脚本输出示例：`AiSubtitleSessionBinder.java: blob is LF-only; nothing to normalize`、`SubtitleDisplay.java: blob is LF-only; nothing to normalize`、`SubtitleExportBundle.java: blob is LF-only; nothing to normalize`、`SubtitleExportSnapshot.java: blob is LF-only; nothing to normalize`、`SubtitlePrefetchTicker.java: blob is LF-only; nothing to normalize`。同一批里有 `SubtitleManager.java: renormalized 272 lines` 与 `PlaybackPresenter.java: renormalized 1681 lines`。"
+  },
+  {
+   "id": "edit-without-reread",
+   "source": "tool error in session: cannot edit PlaybackPresenter.java: file changed since it was read - re-read the file, then retry",
+   "claim": "那次 edit 失败本可避免，因为文件在被我自己运行的归一化脚本改写后没有重新 read。",
+   "evidence": "顺序：edit（成功）→ 运行 normalize-line-endings.py（重写整文件字节）→ 直接再 edit → 报错 `file changed since it was read - re-read the file, then retry`。随后的成功路径是先 read 整文件再 edit。"
+  },
+  {
+   "id": "gradle-filter-hides",
+   "source": "session pwsh: gradlew ... | Select-String -Pattern 'BUILD SUCCESSFUL|BUILD FAILED'",
+   "claim": "把 Gradle 输出过滤成只剩 BUILD 状态行会隐藏编译诊断，并导致额外的 Gradle 运行。",
+   "evidence": "第一次输出只有 `FAILURE: Build failed with an exception.` 与 `BUILD FAILED in 43s`，没有 javac 诊断；随后第二次运行改为捕获日志并用 `\\.java:\\d+` 过滤，才看到 `SubtitleConnectionTest.java:66: 错误: 对SubtitleBatch的引用不明确`。每次 Gradle 运行约 40-55 秒。"
+  },
+  {
+   "id": "add-all-staging",
+   "source": "session pwsh: git add -A (before each of 3 commits)",
+   "claim": "在本会话使用 git add -A 是安全的，因为工作树里只有本任务自己的改动。",
+   "evidence": "提交前 `git status --porcelain` 显示：Kiss 相关 30 个 M/A 文件 + docs 4 个 M + 研究文档；唯一非本会话改动是 docs/research/README.md 的一行链接（同属 Kiss 工作，已显式承接）。子模块无漂移（`git submodule status` 无 '+'）。三处 9182d5e..HEAD 提交共 69 files，未包含他人无关文件。"
+  },
+  {
+   "id": "present-limit",
+   "source": "tool error in session: present accepts 1 to 8 files",
+   "claim": "一次提交 10 个文件的 present 调用因未先确认数量上限而白白浪费一次调用。",
+   "evidence": "调用参数为 10 个文件；返回 `ToolCallError: present accepts 1 to 8 files`；随后拆成 8 个文件重发并成功。"
+  },
+  {
+   "id": "ts-escape-errors",
+   "source": "three run_code parse failures in session",
+   "claim": "同一类字符串转义错误（双引号/反引号未转义）在一次会话里出现了三次，每次都要求把整个程序重新发送。",
+   "evidence": "三次错误：1) `Expected ',', got 'ident'`（中文正文里用了 ASCII 双引号包裹词汇）；2) `Expected ',', got '<lexing error>'`（同类，另一次）；3) 同一类再次出现在模板字符串内嵌反引号时。每次失败后都重发了完整 run_code 程序（数百行），并额外读取锚点文本以修正。"
+  },
+  {
+   "id": "read-before-edit-required",
+   "source": "harness errors: file has not been read - read the file, then retry / file changed since it was read",
+   "claim": "对将被编辑的文件做整文件 read 是 harness 观察策略的要求，而不是可以自由省略的动作。",
+   "evidence": "错误例：`cannot modify values-zh/strings.xml: file has not been read - read the file, then retry`；`cannot edit SubtitleManager.java: file changed since it was read`。按 read 后 edit 的顺序执行时同一操作成功。"
+  },
+  {
+   "id": "selfcheck-test-first",
+   "source": "session test runs: SubtitleRuleSegmenterTest/SubtitleRetranslationTest before and after the fix",
+   "claim": "自查发现的三个缺陷是先写成失败测试复现、再修代码的，且修复前后结果都有记录。",
+   "evidence": "修复前：`SubtitleRetranslationTest > anUnchangedConfigurationNeverReRequestsAFinishedItem FAILED`、`anOverlappingRegionKeepsItsRawFrameInsteadOfFailingTheWholeTimeline FAILED`、`anUnknownEndFrameKeepsItsRawCueInsteadOfFailingTheWholeTimeline FAILED`，`24 tests completed, 3 failed`。修复后：范围内 `SubtitleRetranslationTest 5/0`、`SubtitleRuleSegmenterTest 19/0`，整模块 `68 suites / 558 tests / 0 failures`。"
+  },
+  {
+   "id": "no-jev-during-impl",
+   "source": "docs/development/2026-09-20.md K4/K5 entry; docs/plans/evidence/ Jev files",
+   "claim": "K4/K5 实施与自查期间没有调用 Jev，当时也没有在记录里写下不调用的理由。",
+   "evidence": "K4/K5 条目只列了实现与测试命令，没有 Jev 行；`docs/plans/evidence/` 在此之前最新的 Jev 文件是 Kiss 研究/复核轮（kiss-agent-review-2026-09-20-*），本轮实施没有新增 Jev 输入/结果。"
+  },
+  {
+   "id": "placeholders-not-claims",
+   "source": "docs/development/2026-09-20.md candidate entries",
+   "claim": "报告条目里没有把未执行的测量写成既成结果；未产生的数字先留占位后补齐。",
+   "evidence": "候选条目原文示例：`提交号、push 结果、CI run/tag/APK 哈希在候选产出后补记于下一小节（本条先记录本地状态，不预填未发生的结果）`；随后条目补记了 run 35510576265 / tag / 哈希。另有 `见随附命令` 之后由同一步命令结果补齐。"
+  },
+  {
+   "id": "spill-concentration",
+   "source": "spill inventory dsh-spill-l7VoNc/session-70e2499d6140",
+   "claim": "被截断的模型可见输出主要来自对超大文件的 read，而不是来自验证命令。",
+   "evidence": "统计：29 个 spill 文件共 1,555KB —— read 22 个 / 1,177KB（76%）、run_code 5 个 / 256KB（17%）、pwsh 1 个 / 56KB（3%）、job_output 1 个 / 66KB（3%）。验证类命令（gradlew、git、doc checker）多数输出被管道过滤，未进 spill。"
+  }
+ ]
+}
