@@ -33,6 +33,8 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
     private SubtitleTranslationDispatcher mDispatcher;
     private SubtitleTranslationCache mTranslationCache;
     private SubtitleTimeline mTimeline;
+    /** Source key the installed timeline belongs to; a mismatch means "not exportable yet". */
+    private String mTimelineSourceKey;
     private List<SubtitleItem> mFrameItems = Collections.emptyList();
 
     public AiSubtitleSessionBinder(SubtitleDisplay display, SubtitleSourceProvider sourceProvider) {
@@ -167,6 +169,7 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
      */
     public void setTimeline(SubtitleTimeline timeline) {
         mTimeline = timeline;
+        mTimelineSourceKey = timeline != null ? mController.getActiveSourceKey() : null;
         // The tracked frame belonged to the previous timeline; until the next tick recomputes it, a
         // stray repaint must not write cache entries of an unrelated frame.
         onFrameItems(null);
@@ -184,6 +187,23 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
      */
     public SubtitleTimeline getTimeline() {
         return mTimeline;
+    }
+
+    /**
+     * The installed timeline only when it belongs to the subtitle source that is selected right now.
+     *
+     * <p>The timeline describes one source's payload, so it stays bound to that source even when the
+     * player moves on: a track or manifest change makes this return null until the fetch for the new
+     * source installed its own timeline. That is what keeps an export from writing the previous
+     * track's text, without disturbing the display or prefetch paths (which keep using
+     * {@link #getTimeline()}).
+     */
+    public SubtitleTimeline getTimelineOfCurrentSource() {
+        String currentKey = mController.getActiveSourceKey();
+
+        return mTimeline != null && currentKey != null && currentKey.equals(mTimelineSourceKey)
+                ? mTimeline
+                : null;
     }
 
     /** Remembers the items of the frame the player is showing right now. */
@@ -262,9 +282,6 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
 
         if (previousKey == null ? currentKey != null : !previousKey.equals(currentKey)) {
             cancelDispatcher(); // the selected source changed: a batch of the old one belongs to it
-            // The timeline of the previous source must never be exported (or prefetched) as the new
-            // source's text; the next fetch installs the timeline that belongs to this source.
-            setTimeline(null);
         }
     }
 }

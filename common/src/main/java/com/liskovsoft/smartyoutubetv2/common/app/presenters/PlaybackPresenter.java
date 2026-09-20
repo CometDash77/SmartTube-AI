@@ -440,7 +440,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             return;
         }
 
-        if (mAiSubtitleBinder.getTimeline() != null) {
+        if (mAiSubtitleBinder.getTimelineOfCurrentSource() != null) {
             return; // this source already has its timeline; refetching would only cost another read
         }
 
@@ -671,7 +671,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         SubtitleTranslationCache cache = mAiTranslationCache;
         Map<String, String> translations = cache != null ? cache.snapshot() : Collections.<String, String>emptyMap();
         Map<String, String> translationStatus = cache != null ? cache.statusSnapshot() : Collections.<String, String>emptyMap();
-        SubtitleTimeline timeline = binder != null ? binder.getTimeline() : null;
+        SubtitleTimeline timeline = binder != null ? binder.getTimelineOfCurrentSource() : null;
         SubtitleExportSnapshot.Counters counters = new SubtitleExportSnapshot.Counters(
                 mAiStats.getRequests(), mAiStats.getDeliveredItems(), mAiStats.getFailedBatches(),
                 mAiStats.getCancelledBatches(), translations.size(), cache != null ? cache.getBytes() : 0);
