@@ -1,7 +1,8 @@
 # 第三轮字幕修复实施计划（交下一位 agent）
 
-状态：**R1–R4 已实施（2026-09-20，本地代码与静态/单元验证），R5/R6 待 CI 与设备**。2026-09-20，Asia/Hong_Kong；复核基线 `production` / `3e6a0d24`。
-原计划由用户转交的下一位 agent 实施；实施内容、本地验证与未决项见当日开发记录 `docs/development/2026-09-20.md` 的 13:45 HKT 条目。本文件仍是验收门槛定义，不是发布授权：CI 通过或生成 APK 都不等于设备验收通过。
+状态：**R1–R4 已实施；R5 必需门禁已在 `fdd3ea23` 通过并发布验收候选；R6 设备验收待用户**。2026-09-20，Asia/Hong_Kong；复核基线 `production` / `3e6a0d24`。
+R5：run 35492871596（success）——必需 `exoplayer.other` 范围与整模块 common 套件通过（门禁产物 59 suites/446 tests/0 failures）、两模块 release lint、debug 组装、`apksigner verify` 通过；候选 `stbeta-32.53-nightly-21-21-debug`（target `fdd3ea23`，debug 回退签名，仓库无 Secrets）。
+实施内容、本地验证与未决项见当日开发记录 `docs/development/2026-09-20.md` 的 13:45/14:05/14:20/14:45 HKT 条目与 [Jev 审核](evidence/subtitle-round3-review.md)。本文件仍是验收门槛定义，不是发布授权：CI 通过或生成 APK 都不等于设备验收通过。
 证据与裁决：[独立复核](evidence/subtitle-round2-independent-review-2026-09-20.md)。本计划细化并取代主计划 §20 的待审建议；§14/§15 的产品与交付契约继续有效。
 
 ## 1. 更新后的目标与优先级

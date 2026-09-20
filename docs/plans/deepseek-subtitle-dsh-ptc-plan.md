@@ -956,4 +956,5 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 ### 21.3 实施状态（2026-09-20，本轮）
 
 R1–R4 已按 §21.2 实施：快照新增 **真实 selected / binder status / playerReadiness** 观测，协调器以固定 `RequestResult` 取代 boolean，Presenter 补齐 readiness 拒绝与 `timelineRequests/Installs/Skips`、`lastTimelineRequestResult`；导出失败原因改由**点击时快照**计算并在 UI 拆分六条提示；API Key 入口、输入/保存反馈与 `AI_OFF` 文案修正，新增 `NOT_READY` 菜单状态与两条用途引导；选轨→身份同步→原文准备链路以可控测试覆盖，未重现漏触发，故未改选轨触发逻辑。诊断报告升为 `formatVersion=2`。
-本轮本地验证为 javac 静态编译与 52 个纯 JVM 测试通过（非 Gradle），Robolectric 协调器测试仅编译、由 CI 的 JDK 11 门禁执行；CI 门禁、验收候选与设备验收按 §21.2 第 5 条推进，未完成前不称成品。详细证据见当日开发记录 13:45 HKT 条目。
+本轮本地验证为 javac 静态编译与 52 个纯 JVM 测试通过（非 Gradle），Robolectric 协调器测试仅编译、由 CI 的 JDK 11 门禁执行。
+R5 结果（2026-09-20）：run 35492871596 在 `fdd3ea23` 上 success —— 必需 `exoplayer.other` 范围与整模块 common 套件通过（门禁产物 59 suites / 446 tests / 0 failures / 0 errors）、`:common:lintStbetaRelease :smarttubetv:lintStbetaRelease` 通过、`:smarttubetv:assembleStbetaDebug` 通过、`apksigner verify` 通过；发布验收候选 `stbeta-32.53-nightly-21-21-debug`（universal SHA-256 `1a35c4dd…`，本机独立复核哈希/元数据/证书一致，证书为 debug 回退身份 `7bbde503…`）。R6 的设备/遥控器/真实 Key 验收与项目签名 RC 仍未完成；详细证据见当日开发记录 14:45 HKT 条目与 `docs/plans/evidence/subtitle-round3-review.md`。
