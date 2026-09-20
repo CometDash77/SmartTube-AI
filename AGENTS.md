@@ -9,6 +9,8 @@
 
 ## Project engineering rules
 
+- Follow `docs/development/review-handoff.md` for tool use and evidence: reuse unchanged reads, scope searches, and serialize modification → read-back/diff → validation → reporting. Scripted replacements must fail on unexpected match counts; never report a change based on command success alone. These are agent obligations, not runtime-enforced hooks.
+
 - This is an Android TV Gradle project. App code is in `smarttubetv/`, shared application code in `common/`; preserve TV remote/focus behavior and existing Android compatibility constraints.
 - `SharedModules/` and `MediaServiceCore/` are Git submodules. `settings.gradle` prefers sibling checkouts (`../SharedModules`, `../MediaServiceCore`) when present. Before editing shared code, establish which checkout the build actually uses; keep unrelated submodule revisions intact.
 - Use the checked-in Gradle wrapper. CI uses JDK 17 and the `stbeta` release variant; dependency and SDK versions come from the selected SharedModules constants. For build setup, task selection, signing, or APK verification, use `.agents/skills/smarttube-build/SKILL.md`.

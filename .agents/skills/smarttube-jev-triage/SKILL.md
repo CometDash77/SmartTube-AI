@@ -27,6 +27,12 @@ Keep 1-24 items and <=20,000 UTF-8 bytes of state. Rank bypasses Jev below eight
 
 All independent questions share **one native typed request**. Existing provider configuration is supported without new dependencies. For schemas, credentials and provider details read [usage.md](references/usage.md) only as needed.
 
+## Evidence and call economy
+
+- For implementation claims, supply bounded actual source/test excerpts with revision or run identity and source locators. A plan or status summary can establish reported status only; it cannot independently prove implementation, acceptance or that all local work is blocked.
+- Reuse retrieved evidence from the same state. Do not ask Jev for exact counts, replacement success, tool scheduling or open-ended task priority. New questions must affect a concrete review decision, not merely repeat a prior summary.
+- Persist exact input before the live request and its actual stdout result immediately, including fallback reports; inspect and retain per-row adjudication. Do not repeat unchanged paid calls to recover output that was not saved. If evidence was lost, record that gap rather than reconstructing a raw result.
+
 ## Consume
 
 - **Rank / Noul:** useful evidence for this next task step? `p >= .85` reads first, `p <= .10` defers; uncertainty stays for Astra. Noul has no separate confidence. Supporting callers/tests and contradicting evidence may be relevant.

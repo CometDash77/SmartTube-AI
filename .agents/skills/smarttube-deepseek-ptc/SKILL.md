@@ -27,6 +27,9 @@ This is a thin adapter over the shared project rules. It does not supersede the 
 
 ## Tool-call guidance
 
+- Reuse retained results at the same revision unless content is missing or freshness/read-before-edit requires a reread. Scope/filter in PTC before returning excerpts; truncated output is a cue to narrow retrieval, not repeat the dump.
+- Probe unfamiliar query syntax once before batching. Keep mutation, read-back/diff, validation and success reporting in that order across PTC calls; never batch a write beside its check. Scripted edits must reject missing/unexpected match counts before writing.
+
 - Use explicit, small schemas and stable field names. Avoid giant free-form tool results and repeated repository dumps.
 - Batch independent read/search operations in one PTC program when ordering is irrelevant; keep edits, approvals, and dependent commands sequential.
 - Do not recursively invoke `run_code`, leak credentials, or use PTC to authorize destructive or external actions.
