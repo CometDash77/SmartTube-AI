@@ -114,12 +114,44 @@ public class SubtitleRuleSegmenterTest {
     }
 
     @Test
-    public void aMultiSlotFrameIsNeverMerged() {
+    public void anOverlappingRegionKeepsItsRawFrameInsteadOfFailingTheWholeTimeline() {
+        SubtitleTimeline raw = timeline(
+                frame(0, SECOND, item("a", "Hello.")),
+                frame(SECOND, 2 * SECOND, item("left", "Left side"), item("right", "Right side")),
+                frame(2 * SECOND, 3 * SECOND, item("b", "World.")));
+
+        SubtitleRuleSegmenter.Result result = new SubtitleRuleSegmenter().segment(raw, "en");
+
+        assertTrue("the rest of the timeline is still segmented", result.isDerived());
+        assertEquals(Arrays.asList("Hello.", "World."), texts(result));
+
+        SubtitleFrame passthrough = result.getTimeline().frameAt(SECOND + SECOND / 2);
+
+        assertNotNull("the overlapping region keeps a frame", passthrough);
+        assertEquals("and that frame keeps the original cues", 2, passthrough.getItems().size());
+        assertEquals("left", passthrough.getItems().get(0).getItemId());
+    }
+
+    @Test
+    public void anUnknownEndFrameKeepsItsRawCueInsteadOfFailingTheWholeTimeline() {
+        SubtitleTimeline raw = timeline(
+                frame(0, SECOND, item("a", "Hello.")),
+                frame(SECOND, com.google.android.exoplayer2.C.TIME_UNSET, item("b", "World")));
+
+        SubtitleRuleSegmenter.Result result = new SubtitleRuleSegmenter().segment(raw, "en");
+
+        assertTrue(result.isDerived());
+        assertEquals(Collections.singletonList("Hello."), texts(result));
+        assertEquals("b", result.getTimeline().frameAt(SECOND + SECOND / 2).getItems().get(0).getItemId());
+    }
+
+    @Test
+    public void aTimelineWithoutAnySegmentableItemFallsBackToTheRawOne() {
         SubtitleRuleSegmenter.Result result = new SubtitleRuleSegmenter().segment(timeline(
                 frame(0, 2 * SECOND, item("a", "Left side"), item("b", "Right side"))), "en");
 
-        assertEquals(2, result.getSegmentCount());
-        assertEquals(Arrays.asList("Left side", "Right side"), texts(result));
+        assertFalse("nothing to segment: the raw timeline stays in charge", result.isDerived());
+        assertEquals(SubtitleRuleSegmenter.FAILURE_INVALID, result.getFallback());
     }
 
     @Test

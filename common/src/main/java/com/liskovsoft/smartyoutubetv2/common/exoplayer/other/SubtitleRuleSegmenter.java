@@ -167,13 +167,18 @@ public class SubtitleRuleSegmenter {
         List<Segment> segments = new ArrayList<>();
         int hardBoundaries = 0;
         List<Entry> current = new ArrayList<>();
-        boolean unknownEnd = false;
 
         for (int i = 0; i < entries.size(); i++) {
             Entry entry = entries.get(i);
 
-            if (entry.mEndUs == C.TIME_UNSET) {
-                unknownEnd = true;
+            if (entry.mPassthrough) {
+                if (!current.isEmpty()) {
+                    segments.add(closeSegment(current, raw));
+                    current = new ArrayList<>();
+                }
+
+                hardBoundaries++;
+                continue; // the raw frame of this region is copied into the derived timeline
             }
 
             if (current.isEmpty()) {
@@ -193,10 +198,10 @@ public class SubtitleRuleSegmenter {
             boolean sentenceEnd = endsSentence(previous.mText);
             boolean tooLong = exceedsLength(current, entry)
                     || entry.mEndUs - current.get(0).mStartUs > MAX_DURATION_US;
-            boolean boundary = entry.mBoundaryBefore || entry.isHardBoundary() || pause || sentenceEnd || tooLong;
+            boolean boundary = entry.mHardBoundary || entry.isHardBoundary() || pause || sentenceEnd || tooLong;
 
             if (boundary) {
-                if (entry.mBoundaryBefore || entry.isHardBoundary()) {
+                if (entry.mHardBoundary || entry.isHardBoundary()) {
                     hardBoundaries++;
                 }
 
@@ -207,8 +212,8 @@ public class SubtitleRuleSegmenter {
             current.add(entry);
 
             if (entry.isHardBoundary()) {
-                // A speaker change, a non-speech marker or a multi-slot frame is a whole sentence:
-                // nothing may be merged onto it either.
+                // A speaker change or a non-speech marker is a whole sentence: nothing may be merged
+                // onto it either.
                 hardBoundaries++;
                 segments.add(closeSegment(current, raw));
                 current = new ArrayList<>();
@@ -225,10 +230,6 @@ public class SubtitleRuleSegmenter {
             if (segment.isUnsplit()) {
                 longUnsplit++;
             }
-        }
-
-        if (unknownEnd) {
-            return new Result(raw, segments, longUnsplit, hardBoundaries, FAILURE_INVALID);
         }
 
         List<SubtitleFrame> frames = buildFrames(raw, segments);
@@ -250,21 +251,21 @@ public class SubtitleRuleSegmenter {
         private final long mStartUs;
         private long mEndUs;
         private final boolean mHardBoundary;
-        private final boolean mMultiSlot;
-        private boolean mBoundaryBefore;
+        /** A region the rules do not segment: its raw frame stays in the derived timeline as it is. */
+        private final boolean mPassthrough;
 
         private Entry(String itemId, String text, long startUs, long endUs, boolean hardBoundary,
-                      boolean multiSlot) {
+                      boolean passthrough) {
             mItemId = itemId;
             mText = text;
             mStartUs = startUs;
             mEndUs = endUs;
             mHardBoundary = hardBoundary;
-            mMultiSlot = multiSlot;
+            mPassthrough = passthrough;
         }
 
         private boolean isHardBoundary() {
-            return mHardBoundary || mMultiSlot || isNonSpeech(mText);
+            return mHardBoundary || isNonSpeech(mText);
         }
     }
 
@@ -284,8 +285,9 @@ public class SubtitleRuleSegmenter {
                 continue;
             }
 
-            boolean multiSlot = frame.getItems().size() > 1;
-            boolean unknownEnd = frame.getEndUs() == C.TIME_UNSET;
+            // Overlapping (multi-slot) cues and an unknown end time cannot be merged safely, so the
+            // snapshot's own frame is kept for that region instead of failing the whole timeline.
+            boolean passthrough = frame.getItems().size() > 1 || frame.getEndUs() == C.TIME_UNSET;
 
             for (SubtitleItem item : frame.getItems()) {
                 String text = item.getText();
@@ -302,12 +304,14 @@ public class SubtitleRuleSegmenter {
                     continue;
                 }
 
-                Entry entry = new Entry(item.getItemId(), text.trim(), frame.getStartUs(), frame.getEndUs(),
-                        multiSlot || unknownEnd, multiSlot);
-                entry.mBoundaryBefore = boundaryBefore;
-                positions.put(item.getItemId(), entries.size());
-                entries.add(entry);
+                entries.add(new Entry(item.getItemId(), text.trim(), frame.getStartUs(), frame.getEndUs(),
+                        boundaryBefore, passthrough));
+                positions.put(item.getItemId(), entries.size() - 1);
                 boundaryBefore = false;
+            }
+
+            if (passthrough) {
+                boundaryBefore = true; // nothing may merge across a region that keeps its raw frame
             }
         }
 
@@ -360,9 +364,7 @@ public class SubtitleRuleSegmenter {
 
         for (Segment segment : segments) {
             while (pointer < rawFrames.size() && rawFrames.get(pointer).getStartUs() < segment.getStartUs()) {
-                SubtitleFrame frame = rawFrames.get(pointer);
-                frames.add(new SubtitleFrame(frame.getStartUs(), frame.getEndUs(),
-                        Collections.<SubtitleItem>emptyList()));
+                frames.add(copyOf(rawFrames.get(pointer)));
                 pointer++;
             }
 
@@ -376,13 +378,19 @@ public class SubtitleRuleSegmenter {
         }
 
         while (pointer < rawFrames.size()) {
-            SubtitleFrame frame = rawFrames.get(pointer);
-            frames.add(new SubtitleFrame(frame.getStartUs(), frame.getEndUs(),
-                    Collections.<SubtitleItem>emptyList()));
+            frames.add(copyOf(rawFrames.get(pointer)));
             pointer++;
         }
 
         return frames;
+    }
+
+    /**
+     * A frame the rules do not segment keeps exactly the snapshot's own items (an overlapping cue, an
+     * unknown end or a clearing frame), so that region looks the same as with the rule off.
+     */
+    private static SubtitleFrame copyOf(SubtitleFrame frame) {
+        return new SubtitleFrame(frame.getStartUs(), frame.getEndUs(), frame.getItems());
     }
 
     /**

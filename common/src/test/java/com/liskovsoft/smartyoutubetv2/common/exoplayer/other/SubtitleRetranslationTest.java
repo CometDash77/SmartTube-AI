@@ -191,6 +191,38 @@ public class SubtitleRetranslationTest {
     }
 
     @Test
+    public void anUnchangedConfigurationNeverReRequestsAFinishedItem() {
+        RecordingDisplay display = new RecordingDisplay();
+        AiSubtitleSessionBinder binder = new AiSubtitleSessionBinder(display, SubtitleRetranslationTest::source);
+        SubtitleTranslationCache cache = new SubtitleTranslationCache();
+        FakeService service = new FakeService();
+        FixedClock clock = new FixedClock();
+        SubtitleTranslationDispatcher dispatcher = new SubtitleTranslationDispatcher(
+                new SubtitleBatchPlanner(), cache, service, clock, null);
+
+        binder.setTranslationCache(cache);
+        binder.installDispatcher(dispatcher);
+        binder.setTimeline(timeline());
+        binder.onVideoLoaded();
+        binder.onAiEnabled(true);
+
+        assertTrue(binder.onTick(0));
+        service.succeed(0, "Hallo");
+
+        assertEquals(1, service.startCount());
+
+        // An unrelated event re-syncs a configuration that did not change (a display-mode switch, a
+        // snapshot settle, the same rule value again). Finished work must stay finished.
+        binder.onDisplayMode(SubtitleComposer.MODE_BILINGUAL);
+        binder.setRuleSegmentation(false);
+        binder.setRuleSegmentation(false);
+        clock.advance(2_000);
+
+        assertFalse("no new work while nothing changed", binder.onTick(0));
+        assertEquals("a finished item must not be requested again", 1, service.startCount());
+    }
+
+    @Test
     public void retranslationIsRefusedWithoutAiOrWithoutASource() {
         RecordingDisplay display = new RecordingDisplay();
         SubtitleTimeline timeline = timeline();

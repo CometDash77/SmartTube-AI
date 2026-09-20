@@ -246,6 +246,10 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
         }
 
         if (dispatcher != null) {
+            if (mActiveTimeline != null) {
+                dispatcher.setTimeline(mActiveTimeline); // the dispatcher joined after the install
+            }
+
             setTickTarget(positionUs -> {
                 dispatcher.setPosition(positionUs);
 
@@ -379,10 +383,13 @@ public class AiSubtitleSessionBinder implements SubtitlePrefetchLoop.Pipeline {
             // The tracked frame belonged to the previous timeline; until the next tick recomputes it,
             // a stray repaint must not write cache entries of an unrelated frame.
             onFrameItems(null);
-        }
 
-        if (mDispatcher != null) {
-            mDispatcher.setTimeline(active);
+            if (mDispatcher != null) {
+                // Only a different unit set may reset the planner: forwarding the same timeline again
+                // would clear its done/pending bookkeeping and re-request finished items (a mode
+                // switch or a snapshot settle must never cost a new request).
+                mDispatcher.setTimeline(active);
+            }
         }
 
         if (!isDerivedDisplayActive()) {

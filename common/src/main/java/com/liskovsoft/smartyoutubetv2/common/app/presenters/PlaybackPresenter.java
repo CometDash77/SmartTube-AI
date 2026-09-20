@@ -116,6 +116,11 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
     /** Bounded 100 ms derived-sentence display check, separate from the one-second prefetch loop. */
     private SubtitlePrefetchTicker mAiDerivedTicker;
     private final SubtitleRuleSegmenter mAiSegmenter = new SubtitleRuleSegmenter();
+    /** The raw timeline the cached derived sentences were built from (identity is the source key). */
+    private SubtitleTimeline mAiSegmentedRaw;
+    private String mAiSegmentedLanguage;
+    private boolean mAiSegmentedEnabled;
+    private SubtitleTimeline mAiSegmentedTimeline;
     private ExecutorService mAiSnapshotExecutor;
     /** Owns the request identity of the one timeline read per source (task N1). */
     private SubtitleTimelineCoordinator mAiTimeline;
@@ -666,14 +671,30 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         binder.setRuleSegmentation(enabled);
 
         SubtitleTimeline raw = binder.getTimeline();
+        String language = binder.getActiveSourceLanguage();
+
+        if (raw == mAiSegmentedRaw && enabled == mAiSegmentedEnabled
+                && (language == null ? mAiSegmentedLanguage == null : language.equals(mAiSegmentedLanguage))) {
+            // The same source, switch and language: hand back the very same derived timeline, because
+            // installing a new but equal instance would reset the planner and re-request finished items.
+            binder.setDerivedTimeline(mAiSegmentedTimeline);
+            refreshAiDerivedDisplay();
+
+            return;
+        }
+
+        mAiSegmentedRaw = raw;
+        mAiSegmentedEnabled = enabled;
+        mAiSegmentedLanguage = language;
 
         if (!enabled || raw == null || raw.isEmpty()) {
+            mAiSegmentedTimeline = null;
             binder.setDerivedTimeline(null);
             refreshAiDerivedDisplay();
             return;
         }
 
-        SubtitleRuleSegmenter.Result result = mAiSegmenter.segment(raw, binder.getActiveSourceLanguage());
+        SubtitleRuleSegmenter.Result result = mAiSegmenter.segment(raw, language);
 
         if (result.isDerived()) {
             mAiEvents.add("SEGMENTED_OK");
@@ -681,7 +702,8 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
             mAiEvents.add("SEGMENTED_" + result.getFallback());
         }
 
-        binder.setDerivedTimeline(result.isDerived() ? result.getTimeline() : null);
+        mAiSegmentedTimeline = result.isDerived() ? result.getTimeline() : null;
+        binder.setDerivedTimeline(mAiSegmentedTimeline);
         refreshAiDerivedDisplay();
     }
 
