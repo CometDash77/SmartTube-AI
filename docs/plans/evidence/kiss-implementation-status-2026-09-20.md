@@ -43,9 +43,11 @@
 | `:common:compileStbetaDebugJavaWithJavac` | BUILD SUCCESSFUL, exit 0 |
 | `:common:lintStbetaRelease :smarttubetv:compileStbetaDebugJavaWithJavac` | BUILD SUCCESSFUL, exit 0（lint 日志仍出现本机 JDK 11 的 `WorkManagerIssueRegistry` class-file 61 提示，属既有环境现象） |
 | `:smarttubetv:lintStbetaRelease` | **BUILD SUCCESSFUL, exit 0**（1 m 8 s） |
+| GitHub Actions run 35514438045（JDK 11 测试 job，nightly-26） | **success**；`unit-test-reports` 解析：**68 suites / 555 tests / 0 failures / 0 errors / 0 skipped**（新增 `SubtitleRuleSegmenterTest` 17 tests / 0 failures） |
 | GitHub Actions run 35510576265（JDK 11 测试 job） | **success**；下载 `unit-test-reports` 解析 XML：**67 suites / 529 tests / 0 failures / 0 errors / 0 skipped**（与本机整模块结果一致） |
 | GitHub Actions run 35510576265（JDK 17 publish job） | **success**；双模块 release lint、`:smarttubetv:assembleStbetaDebug`、`apksigner verify`、prerelease 发布与 artifact 上传全部通过；VirusTotal 按设计跳过 |
-| 候选独立复核（本机 SDK build-tools 37.0.0 + JBR 17） | universal APK 45,130,107 B，SHA-256 `a77af5fc941dcc11cd7c0075a8f1d52aa764c0610a569d2f247165d2d6e9fe43` 与 `SHA256SUMS.txt` 一致；`apksigner verify` = `Verifies`（v1/v2），证书 DN `C=US, O=Android, CN=Android Debug` / SHA-256 `9fb71b8a…`（debug 回退）；`aapt` = versionCode 2443 / versionName 32.53-nightly-25 / minSdk 17 / targetSdk 34 / universal 含 arm64-v8a+armeabi-v7a |
+| nightly-26 候选独立复核（本机 SDK build-tools 37.0.0 + JBR 17） | universal APK 45,138,608 B，SHA-256 `70d9be45faa5575de1f9ceffe4343e922b59264426f9af4c204d72f1cd1e6dd3` 与 `SHA256SUMS.txt` 一致；`apksigner` = `Verifies`（v1/v2），证书 `CN=Android Debug` / `2e98a075…`；`aapt` = versionCode 2443 / versionName 32.53-nightly-26 / minSdk 17 / targetSdk 34 |
+| 候选独立复核（nightly-25） | universal APK 45,130,107 B，SHA-256 `a77af5fc941dcc11cd7c0075a8f1d52aa764c0610a569d2f247165d2d6e9fe43` 与 `SHA256SUMS.txt` 一致；`apksigner verify` = `Verifies`（v1/v2），证书 DN `C=US, O=Android, CN=Android Debug` / SHA-256 `9fb71b8a…`（debug 回退）；`aapt` = versionCode 2443 / versionName 32.53-nightly-25 / minSdk 17 / targetSdk 34 / universal 含 arm64-v8a+armeabi-v7a |
 | `git diff --check` / `python -B scripts/check-development-docs.py` | 见当天记录最终检查 |
 
 **已执行（远端，同一 SHA `6c70e370`）：** GitHub Actions 必需范围与整模块测试、双模块 release lint（JDK 17）、APK 组装、`apksigner` 校验与 prerelease 发布，见上表。

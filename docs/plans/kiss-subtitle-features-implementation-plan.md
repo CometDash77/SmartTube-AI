@@ -227,7 +227,9 @@ seek 保留同源摘要和可复用译文、清连贯历史；seek 打断尚未�
 
 目的：让已实现并接线的功能**今天就可在电视上验收**，而不是等四个功能全部完成。规则断句（K4/K5）**不在本轮范围**，见下方“明确不在范围”。
 
-**验收对象**：prerelease **`stbeta-32.53-nightly-25-25-debug`**，targetCommitish `6c70e37093f0074d624eab6c1a1e9b234d548281`，GitHub run [35510576265](https://github.com/CometDash77/SmartTube-AI/actions/runs/35510576265)（conclusion success，67 suites / 529 tests / 0 failures）。资产：`SmartTube_beta_32.53-nightly-25_{universal,arm64-v8a,armeabi-v7a,x86}.apk` + `SHA256SUMS.txt`；universal 45,130,107 B，SHA-256 `a77af5fc941dcc11cd7c0075a8f1d52aa764c0610a569d2f247165d2d6e9fe43`。版本 `versionCode=2443`、`versionName=32.53-nightly-25`。完整核对见当天[进度记录](../../development/2026-09-20.md)，逐项状态见[实施状态](evidence/kiss-implementation-status-2026-09-20.md)。
+**验收对象（第 2 轮）：prerelease **`stbeta-32.53-nightly-26-26-debug`**，targetCommitish `4b002bcc07bd756f3a63d2fe2aa7916a3f539351`，GitHub run [35514438045](https://github.com/CometDash77/SmartTube-AI/actions/runs/35514438045)（conclusion success，68 suites / 555 tests / 0 failures）；universal 45,138,608 B / SHA-256 `70d9be45…`。它含第 1 轮全部内容，并在其之上加入规则断句（算法/派生显示/派生导出）。
+
+**第 1 轮验收对象（已通过用户测试）**：prerelease **`stbeta-32.53-nightly-25-25-debug`**，targetCommitish `6c70e37093f0074d624eab6c1a1e9b234d548281`，GitHub run [35510576265](https://github.com/CometDash77/SmartTube-AI/actions/runs/35510576265)（conclusion success，67 suites / 529 tests / 0 failures）。资产：`SmartTube_beta_32.53-nightly-25_{universal,arm64-v8a,armeabi-v7a,x86}.apk` + `SHA256SUMS.txt`；universal 45,130,107 B，SHA-256 `a77af5fc941dcc11cd7c0075a8f1d52aa764c0610a569d2f247165d2d6e9fe43`。版本 `versionCode=2443`、`versionName=32.53-nightly-25`。完整核对见当天[进度记录](../../development/2026-09-20.md)，逐项状态见[实施状态](evidence/kiss-implementation-status-2026-09-20.md)。
 
 > **安装前必读（覆盖升级不成立）**：本候选是 **debug 回退签名**（仓库仍无 4 个签名 Secrets），本机独立复核的证书为 `C=US, O=Android, CN=Android Debug` / SHA-256 `9fb71b8a5508f17319acb273846796fc016c21965137534b6fcde3f3cc75cdd`，与 nightly-24 的证书不同。Android 会**拒绝覆盖安装**，需要先卸载旧 nightly —— 这会清空应用数据（偏好与已配置的 Key，安装后需重新输入）。这与[使用说明 §2](../../ai-subtitle-user-guide.md)一致，不是本轮缺陷；要避免清数据必须等仓库配置签名 Secrets 后产出项目签名 RC。
 
@@ -242,6 +244,8 @@ seek 保留同源摘要和可复用译文、清连贯历史；seek 打断尚未�
 7. **字幕加载通知**：加载 / 就绪提示各只出现一次；关闭“字幕加载通知”后不再出现，且当时正在显示的提示立即消失。
 8. 重点回归（本轮修复的行为）：**切换目标语言**后，屏幕上不再出现旧语言的译文（旧配置结果被隔离）；开 AI 后立即关闭，不会留下“翻译中”之类的旧提示。
 9. 导出翻译后的 ZIP，确认 `translated.srt` / `bilingual.srt` 与实际画面一致，`translation-status.txt` 的覆盖与失败说明合理。
+10. **规则断句（第 2 轮新增）**：打开「断句 → 规则断句」，原文合并为完整句子、不再逐条小句跳动；关掉开关或切「仅原文」立即回原生字幕；seek 不做旧句；暂停后再播放不残留。
+11. **派生导出**：规则开时导出，ZIP 同时含 raw 三个文件与 `segmented-original.srt`（有译文时加 `segmented-translated.srt` / `segmented-bilingual.srt`），README 说明包含派生文件；raw 文件与之前一致。
 
 **本轮重点看什么**：通知是否去重且可立即关闭；三档切换是否重建会话（首次翻译延迟可接受）；增强档失败是否静默回退；重翻是否只重翻当前窗口而不是整片；配置变更后是否真的隔离旧译文。
 
