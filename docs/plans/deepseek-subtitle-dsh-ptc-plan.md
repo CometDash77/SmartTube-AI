@@ -644,7 +644,9 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 - 已完成本地实现（未提交、未推送、未安装、未发布）：`SubtitleExportSnapshot`、`SubtitleSrtFormatter`、`SubtitleExportBundle`、`SubtitleDiagnosticReport`、`SubtitleExportEventLog`、`SubtitleExportWriteOutcome`、`SubtitleExportController`、`SubtitleExportFileStore`、`SubtitleDiagnosticEnvironment`（均位于 `common/src/main/java/com/liskovsoft/smartyoutubetv2/common/exoplayer/other/`）；接线改动在 `SubtitleTranslationCache`（新增 `snapshot()` 与并发保护）、`AiSubtitleSessionBinder`（`getTimeline()`）、`PlaybackPresenter`（点击时快照、事件记录、主线程回送结果）与 `PlayerUIController`（两个菜单按钮、结果对话框、权限用途说明）；`values`、`values-zh`、`values-zh-rTW` 各新增 15 条字符串。
 - 由于说明文件与状态描述，以上实现不代表已通过验收：位置与内容见下。保存位置为公共 `Documents/SmartTube/Exports/`（API 29+ 复用 `MediaStoreFile`，旧版本直写公共目录并复用项目存储权限检查）；字幕包含 `original.srt`，存在译文时另有 `translated.srt` 与 `bilingual.srt`，并始终包含说明文件（覆盖范围、缺失译文与原文回退、缓存上限可能导致淘汰、最后一条结束时间为估算）。诊断报告只输出 35 项字段白名单，在无字幕时间轴、无 Key、AI 关闭时同样可用。两者都不发起网络请求、不修改缓存上限、不覆盖同名文件，重复点击只保留一个任务。
 - 本地验证（不是 Gradle）：新代码以 JDK 17 `javac` 针对 `android.jar`(SDK 34)、仓库内 ExoPlayer core jar 与既有已编译类通过编译（exit 0）；5 个新测试类以 JUnitCore 直接执行得到 **OK (45 tests)**；一次 live Jev `audit`（7 条 claim/evidence，5,228/320 tokens，输入 sha256 `e2d4f928…`，无重试/回退）的原始输入、实际结果与逐条回源结论保存在 `docs/plans/evidence/subtitle-t13-jev-input.json`、`subtitle-t13-jev-result.json` 与 `subtitle-t13-review.md`。API-17 审计同时发现并修复了 `AiSubtitleSessionBinder` 中 `java.util.Objects.equals`（API 19）这一既有用法。
-- 尚未完成（不得读作已通过）：`:common:testStbetaDebugUnitTest`、`:common:lintStbetaRelease`、`:smarttubetv:lintStbetaRelease`、debug/release 编译与 APK 组装/签名核对按 §15 在 GitHub Actions 执行；设备验收项为遥控器焦点、一次点击导出、文件管理器可见且可复制、权限拒绝反馈、空间不足反馈，以及导出期间播放不中断。
+- GitHub Actions 验证已完成（2026-09-20，run 35483822239，commit `a0a1ae60`，conclusion success）：必需测试范围（JDK 11，`--tests "...exoplayer.other.*"`）BUILD SUCCESSFUL；`:common:lintStbetaRelease :smarttubetv:lintStbetaRelease`（JDK 17）BUILD SUCCESSFUL；`:smarttubetv:assembleStbetaDebug` BUILD SUCCESSFUL；`apksigner verify` 对 4 个 APK 全部 "Verifies"（V2 签名证书 SHA-256 `9e8073…`）。整模块套件作为非门禁基线报告为 398 tests / 2 failed（两条既有 `ScreensaverManagerTest`；398 = 原记录 353 + 本次新增 45）。
+- 已交付测试候选：prerelease `stbeta-32.53-nightly-2-2-debug`（指向 `a0a1ae60`，含 universal/arm64-v8a/armeabi-v7a/x86 与 `SHA256SUMS.txt`；universal SHA-256 `5f63c414…`）。因仓库当前**没有任何 Secrets**，按本节规则未发布未签名的 release 包，而是发布带醒目说明的 debug 签名回退候选。
+- 尚未完成（不得读作已通过）：设备验收项为遥控器焦点、一次点击导出、文件管理器可见且可复制、权限拒绝反馈、空间不足反馈、导出期间播放不中断；项目签名身份未配置（需要 `SIGNING_KEY`/`KEY_STORE_PASSWORD`/`ALIAS`/`KEY_PASSWORD`），因此尚无项目签名的 release 候选。
 
 
 ## 15. GitHub 编译、签名与 prerelease 交付（最新执行约束）
@@ -684,3 +686,10 @@ CI采用clean构建；本地每次编辑不强制clean。运行前按build技能
 ### 给 DSH 的补充指令
 
 执行 §14/T13 时一并落实本节所需 GitHub 验证与 prerelease 交付；不要本地运行 Gradle 编译/测试/打包。保留工作区现有改动，只提交任务所需内容；在用户仓库对明确 ref 执行远端检查，签名/测试门禁通过后创建 prerelease 并给出下载地址。缺签名配置时阻止发布并报告具体缺项。不要安装电视、发布正式 release 或调用真实付费 API。人工验收之前交付的是测试候选，不能宣称 T13 或整个 AI 字幕功能已经完成。
+
+### 16. 执行记录：远端验证与首个 prerelease（2026-09-20）
+
+- 用户在本阶段明确授权远端编译与 prerelease 发布（至少 universal），因此本轮执行了 commit/push 与 `gh workflow run`，取代 §15 中“尚未授权”的默认。
+- 工作流 `.github/workflows/CI.yml` 已按本节要求改造：名称准确；`push` 到 `master`/`production` 与手动 dispatch；`tests` job（JDK 11）把 `exoplayer.other` 范围作为必需门禁、整模块套件仅作带标注的信息基线；`publish` job（JDK 17）执行两模块 lint → 组装 → `apksigner verify` → 唯一 tag prerelease（含 SHA-256 清单）；缺少四个签名 Secrets 时不发布 release 未签名包，改为构建 `stbetaDebug` 并标注为 debug 回退候选；VirusTotal 仅在手动 dispatch 且 Key 存在时运行。`.gitignore` 增加签名材料条目。
+- 已关闭的原缺口：workflow 名称误导、无单元测试 job、无 prerelease 步骤、无 `apksigner verify`、自动路径默认运行第三方上传。
+- 仍存在：仓库无任何 Secrets（需 `SIGNING_KEY`/`KEY_STORE_PASSWORD`/`ALIAS`/`KEY_PASSWORD` 才能产出项目签名的 release 候选）；该 fork 的普通 push 不触发 workflow，需要 `gh workflow run` 或先在 Actions 页启用；versionCode 未调整，与已安装的不同签名版本无法覆盖安装，未取得已安装签名的证据前不承诺可覆盖升级。

@@ -32,7 +32,7 @@ Retrospective correction: these results were not rerun in this review. New Gradl
 | API correctness | `SubtitleRequestBuilderTest`, `SubtitleResponseParserTest`, `SubtitleResponseHandlerTest`, `SubtitleRetryPolicyTest`, `SubtitleEndpointTest`, `SubtitleCredentialsTest`, `SubtitleOkHttpWireTest` (local synthetic service) | authorised real-key minimal test | automated **verified** (local HTTP only); real DeepSeek call **not done** |
 | Key and configuration | `SubtitleKeyEnvelopeTest`, `SubtitleKeyCipherTest`, `PersistentSubtitleKeyStoreTest`, `SubtitleKeyFileStorageTest`, `SubtitleKeyBackupRulesTest`, `SubtitleKeyStoreFactoryTest`, `MemorySubtitleKeyStoreTest`, `SubtitleAiPrefsStoreTest`, `AppPrefsSubtitleAiBackendTest`, `SubtitleAiSettingsControllerTest` | Keystore restart/invalidation, backup/restore, clear key | automated **verified** (JVM crypto, storage paths, backup rules); real keystore and export **not verified** |
 | Original behaviour preserved | `OriginalSubtitleNormalizerTest` (including a differential test against the former inline implementation), `AiSubtitleControllerTest` (AI off) | CC memory, auto-translated tracks, styles, channel preferences, SABR | automated **verified**; device **not verified** |
-| Local one-click export (T13) | 5 new test classes executed with JUnitCore: SRT boundaries/Unicode/partial translations, ZIP entries and coverage note, diagnostic whitelist and leak checks, click-time snapshot and one-job guard (OK, 45 tests) | remote focus, one-press export, file-manager visibility/copy of `Documents/SmartTube/Exports/`, permission refusal, out-of-space feedback, playback continuity | local **verified** (javac + JUnitCore, not Gradle); Gradle tests/lint **not run**; device **not verified** |
+| Local one-click export (T13) | GitHub run 35483822239: required test scope (`--tests "...exoplayer.other.*"`) BUILD SUCCESSFUL on JDK 11; `:common:lintStbetaRelease :smarttubetv:lintStbetaRelease` BUILD SUCCESSFUL on JDK 17; `:smarttubetv:assembleStbetaDebug` BUILD SUCCESSFUL; `apksigner verify` "Verifies" for all four APKs; prerelease published. Locally: 5 new test classes also run with JUnitCore (OK, 45 tests) and 154 with neighbours | remote focus, one-press export, file-manager visibility/copy of `Documents/SmartTube/Exports/`, permission refusal, out-of-space feedback, playback continuity | automated **verified** on GitHub (test scope, lint, assemble, signature) + local javac/JUnitCore; device **not verified**; project-signed release path **not available** (no signing secrets) |
 
 ## Explicit gaps (do not read as completed)
 
@@ -47,6 +47,33 @@ Retrospective correction: these results were not rerun in this review. New Gradl
    was performed and release lint did not run with its full issue registry under JDK 11, so release quality
    gates are not claimed; no installation or publication happened.
 5. **No commit, push or publication** was performed by this session.
+
+## GitHub verification and the first published prerelease (2026-09-20)
+
+Workflow: `.github/workflows/CI.yml` (renamed, `production` push + manual dispatch, two jobs). Commits on
+`origin/production`: `dc481477` (T13 source, tests, docs, 28 files), `a0a1ae60` (CI + `.gitignore`),
+`af4eddca` (notes fence-quoting fix).
+
+Verified by GitHub run 35483822239 (commit `a0a1ae60`, conclusion **success**):
+
+| Check | Result |
+| --- | --- |
+| Unit tests, required scope (JDK 11) | `./gradlew :common:testStbetaDebugUnitTest --tests "com.liskovsoft.smartyoutubetv2.common.exoplayer.other.*"` -> BUILD SUCCESSFUL in 2m17s |
+| Full common module suite (informational) | `398 tests completed, 2 failed`; both failures are the pre-existing `ScreensaverManagerTest` cases. 398 = the previously recorded 353 + the 45 tests added by T13 |
+| Compatibility lint (JDK 17) | `:common:lintStbetaRelease :smarttubetv:lintStbetaRelease` -> BUILD SUCCESSFUL in 2m31s (includes the `java.util.Objects` API-19 fix) |
+| APK assembly | `:smarttubetv:assembleStbetaDebug` -> BUILD SUCCESSFUL in 1m48s, four ABIs |
+| Signature verification | `apksigner verify --verbose --print-certs` -> "Verifies" for all four APKs; V2 signer certificate SHA-256 `9e80731d74ee74b46e2c8a0ee7b7e32b7271ee8031f313db7087ffd4c49e73ab` |
+| Prerelease | tag `stbeta-32.53-nightly-2-2-debug`, target `a0a1ae60`, four APKs + `SHA256SUMS.txt`; universal SHA-256 `5f63c4145e9119707019271486f2a7ccc4e09c19a5d6bb1b373a6bf6e5b1005e` |
+
+Signing identity: the repository has **no secrets at all** (`actions/secrets` -> `total_count=0`), so the
+workflow refused to ship an unsigned release APK and published a clearly labelled **debug-signed fallback**
+instead (the AGP debug keystore of that runner; V2-signed, so it installs on current Android). A project-signed
+release build needs `SIGNING_KEY`, `KEY_STORE_PASSWORD`, `ALIAS` and `KEY_PASSWORD`. The same signing facts
+mean an installed `org.smarttube.beta` signed with another certificate cannot be updated in place, and a later
+fallback run uses a different debug key.
+
+Also observed, so a later session does not read it as a workflow defect: on this fork an ordinary push to
+`production` produced no run at all; `gh workflow run CI.yml --ref production` is what starts one.
 
 ## T13 local export — implemented locally, not device-verified
 
