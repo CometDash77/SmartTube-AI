@@ -29,11 +29,11 @@
 | 功能 | 状态 | 证据 | 仍缺 |
 | --- | --- | --- | --- |
 | 字幕加载通知 | **自动验证通过** | `SubtitleLoadNotificationPolicyTest`、`SubtitleLoadNoticeDeliveryTest`、内容事务与显示事件回归 | 遥控器焦点/遮挡与真机文案；关闭开关后的实际提示消失行为 |
-| 规则断句导出 | **已实现**（raw 不变，规则开时额外写 segmented-original/-translated/-bilingual.srt，README 说明） | 见上一行测试 | 设备端打开 ZIP 核对内容与画面一致 |
+| 规则断句导出 | **已实现并通过设备验收**（raw 不变，规则开时额外写 segmented-original/-translated/-bilingual.srt，README 说明） | 见上一行测试 | — |
 | 智能上下文（三档） | **连通，档位真正影响请求** | `SubtitleContextPayloadTest`（基础不含译例/摘要、连贯含译例、增强含摘要、空数据不产生空字段）、`SubtitleBatchPlannerTest.neighboursComeFromTheWholeTimelineInTimeOrder`、`SubtitleSessionContextTest`（8 条） | 上下文"准确率提升"；真实样本对照；设备首译延迟 |
 | 视频增强一次性摘要 | **实现并接线（compile + 单测）** | `SubtitleSummaryParserTest`、`SubtitleSummaryAnalyzerTest`（9 条：单次、上限、超时、迟到、失败不重试）、`SubtitleSummarySessionTest`（4 条） | 真实服务下的 5s 预算表现；摘要质量的设备评估 |
 | 强制重翻 | **实现并接线（compile + 单测）** | `SubtitleRetranslationTest`（4 条：成功项也重新请求、旧代次迟到被丢弃、摘要保留而译例清空、AI 关/无来源拒绝） | presenter 结果枚举与菜单回执的真机确认；连续点击与 429 的实际手感 |
-| 规则断句 | **已实现并本地验证，待设备验收**（本节记录 nightly-25 时点后的增量） | `SubtitleRuleSegmenterTest` 17 条（边界、上限、回退、来源映射）、`AiSubtitleSessionBinderTest` +4（派生生效与立即回退）、`SubtitleManagerTest` +2（单一写入入口）、`SubtitleExportBundleTest` +2（raw + segmented 共存）、`SubtitlePrefetchTickerTest` +1；整模块 68 suites / 555 tests / 0 failures | 边界时差（目标 ≤200ms，当前为有界 100ms 检查而非边界单次唤醒）、真机长句拆分与清屏观感、`segmented-*.srt` 在电视文件管理器中的可见性 |
+| 规则断句 | **已实现并通过设备验收**（nightly-27，2026-09-20） | `SubtitleRuleSegmenterTest` 17 条（边界、上限、回退、来源映射）、`AiSubtitleSessionBinderTest` +4（派生生效与立即回退）、`SubtitleManagerTest` +2（单一写入入口）、`SubtitleExportBundleTest` +2（raw + segmented 共存）、`SubtitlePrefetchTickerTest` +1；整模块 68 suites / 555 tests / 0 failures | 边界时差（目标 ≤200ms，当前为有界 100ms 检查而非边界单次唤醒）、真机长句拆分与清屏观感、`segmented-*.srt` 在电视文件管理器中的可见性 |
 
 ## 4. 已执行的验证（本地，非 CI）
 
@@ -53,7 +53,9 @@
 
 **已执行（远端，同一 SHA `6c70e370`）：** GitHub Actions 必需范围与整模块测试、双模块 release lint（JDK 17）、APK 组装、`apksigner` 校验与 prerelease 发布，见上表。
 
-**仍未执行：** 设备安装与电视验收、真实 Key/付费调用、真实 Android Keystore 与备份导出、API 17–22 设备、项目签名 RC（缺 4 个 Secrets）。远端门禁通过只说明代码门禁，不替代电视验收；本轮候选是 debug 回退签名，**覆盖安装 nightly-24 会被拒绝，需先卸载（清空应用数据与 Key）**。
+**已执行（设备）：** 第 1 轮（nightly-25）与第 2 轮（nightly-27，含规则断句与自查修复）均通过用户设备验收。
+
+**仍未执行：** 真实 Key/付费调用（需授权）、真实 Android Keystore 与备份导出、API 17–22 设备、权限拒绝/空间不足/焦点细节的逐项记录、项目签名 RC（缺 4 个 Secrets）。本轮候选是 debug 回退签名，**跨候选覆盖安装会被拒绝，需先卸载（清空应用数据与 Key）**。
 
 ## 5. 顺序差异与理由
 

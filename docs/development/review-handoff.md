@@ -1,6 +1,6 @@
 # Reliable review and handoff
 
-> Current subtitle status: [current status](../plans/subtitle-current-status.md). The user accepted nightly-24; the [Kiss feature plan](../plans/kiss-subtitle-features-implementation-plan.md) is in progress — K0–K3 and K6 are implemented and locally verified, K4/K5 (rule segmentation) are not, and no CI candidate exists for this round. See [Kiss implementation status](../plans/evidence/kiss-implementation-status-2026-09-20.md). The [production rework plan](../plans/subtitle-production-rework-plan.md) is historical, not the automatic next queue. Jev tooling scope and compaction prerequisites: [retrospective](../research/jev-compaction-retrospective.md).
+> Current subtitle status: [current status](../plans/subtitle-current-status.md). **Kiss 功能已全部实现并通过两轮设备验收**（nightly-25 / nightly-27，含规则断句与自查修复）；[下一阶段](../plans/kiss-subtitle-features-implementation-plan.md) 的阻塞项是用户授权（真实 Key 付费调用）与仓库签名 Secrets（项目签名 RC），不依赖外部前提的诊断增量与可选优化可先做。证据见 [Kiss implementation status](../plans/evidence/kiss-implementation-status-2026-09-20.md)。 The [production rework plan](../plans/subtitle-production-rework-plan.md) is historical, not the automatic next queue. Jev tooling scope and compaction prerequisites: [retrospective](../research/jev-compaction-retrospective.md).
 
 ## Navigation and execution
 

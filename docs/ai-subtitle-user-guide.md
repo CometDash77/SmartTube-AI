@@ -3,7 +3,7 @@
 适用版本：SmartTube stbeta 32.53（本仓库 `production` 分支的 AI 字幕功能）
 日期：2026-09-20（Asia/Hong_Kong）· 包名：`org.smarttube.beta` · minSdk 17 / targetSdk 34
 
-> **当前验收候选 nightly-27（`stbeta-32.53-nightly-27-27-debug`，SHA `3eb560b0`，run 35515384600）**：在 nightly-26 之上修掉自查发现的三处缺陷（未变更配置不再重复请求已完成条目；重叠字幕与未知结尾时间改为局部保留原帧，不再让整片规则断句静默失效）。nightly-26 含这三处缺陷，**请勿用它做验收**。原描述（nightly-26）：在 nightly-25（已通过用户测试：智能上下文三档、一次性摘要、强制重翻、可撤销加载通知、四项接线修复）之上加入**规则断句整条链路**——合并为完整句子显示、聚合与回退规则、派生 SRT 导出。CI 68 suites / 555 tests / 0 failures，双模块 release lint、组装与 `apksigner` 校验通过。**它是 debug 回退签名，证书与前几个候选都不同：覆盖安装会被拒绝，需先卸载旧包，会清空应用数据与 Key。** 验收范围见[计划 §9](plans/kiss-subtitle-features-implementation-plan.md)与本文 §4.5/§7。
+> **nightly-27 已通过设备验收（2026-09-20）**。当前验收候选 nightly-27（`stbeta-32.53-nightly-27-27-debug`，SHA `3eb560b0`，run 35515384600）：在 nightly-26 之上修掉自查发现的三处缺陷（未变更配置不再重复请求已完成条目；重叠字幕与未知结尾时间改为局部保留原帧，不再让整片规则断句静默失效）。nightly-26 含这三处缺陷，**请勿用它做验收**。原描述（nightly-26）：在 nightly-25（已通过用户测试：智能上下文三档、一次性摘要、强制重翻、可撤销加载通知、四项接线修复）之上加入**规则断句整条链路**——合并为完整句子显示、聚合与回退规则、派生 SRT 导出。CI 68 suites / 555 tests / 0 failures，双模块 release lint、组装与 `apksigner` 校验通过。**它是 debug 回退签名，证书与前几个候选都不同：覆盖安装会被拒绝，需先卸载旧包，会清空应用数据与 Key。** 验收范围见[计划 §9](plans/kiss-subtitle-features-implementation-plan.md)与本文 §4.5/§7。
 >
 > 历史：**nightly-25**（第 1 轮验收候选，用户测试没问题）、**nightly-24（首次打通工作流，已确认可用）**。nightly-22 日志已证实 Key 当前会话可用并导出 875 条原文，但翻译失败。nightly-24 修复了真实请求缺 model/messages、官方响应未解包、配置入口反馈与 HTTP 诊断等问题，456 项测试及完整 CI 通过。见[当前状态](plans/subtitle-current-status.md)与[第四轮报告](plans/evidence/subtitle-round4-service-review.md)。以下使用步骤不等于已完成电视验收。
 
@@ -191,5 +191,5 @@ DeepSeek 官方配置（2026-09-20 对照[官方文档](https://api-docs.deepsee
    直播滚动字幕、位图字幕（PGS/VOBSUB）与外部播放器明确降级为仅原文。
 6. **已知次要限制**：`translation-status.txt` 只能区分“尝试过但无结果”与“从未到达”，不逐条保留 HTTP 原因；
    缓存 2,000 条 / 2 MiB 上限可能导致长视频早期条目被淘汰后重新翻译。
-7. **规则断句已实现，但尚未设备验收**：算法、派生时间轴、派生显示与 `segmented-*.srt` 导出都已落地并有单测；仍待确认的是**电视上的边界时差**（当前用有界 100ms 检查，计划理想方案是下一边界单次唤醒；目标 ≤200ms）、长句拆分与清屏观感，以及导出 ZIP 在电视文件管理器中的可见性。状态见 [Kiss 实施状态](plans/evidence/kiss-implementation-status-2026-09-20.md)。
-8. **规则断句尚无设备证据**：nightly-26 已通过 CI（68 suites / 555 tests / 0 failures）与本机独立复核，但规则断句的**电视边界时差（目标 ≤200ms，当前 100ms 有界检查）、长句拆分/清屏观感、派生文件在电视文件管理器中的可见性**都还没有设备结论。
+7. **规则断句已通过设备验收（nightly-27）**：算法、派生时间轴、派生显示与 `segmented-*.srt` 导出均已落地并验收。实现用的是与网络预取分离的有界 100ms 显示检查；计划首选的「下一边界单次唤醒」未实现，属**可选优化**（不影响当前验收结论）。
+8. **仍未验证的边界交互**：权限拒绝、空间不足、遥控器焦点细节与首译延迟没有逐项记录；真实 Key 付费调用与项目签名 RC 分别需要用户授权和 4 个签名 Secrets。
