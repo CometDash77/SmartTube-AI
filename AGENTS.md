@@ -41,3 +41,17 @@ Measured evidence and per-item verdicts: `docs/research/agent-tool-use-audit-202
 - The adapter keeps model-facing context compact: give the task, relevant paths, and acceptance checks first; let PTC perform bounded search/filter/aggregation/state bookkeeping in code; return only concise evidence and failures to the model.
 - In PTC mode, call tools through the generated SDK bindings inside `run_code`; do not narrate a simulated tool loop or call `run_code` recursively. Preserve the same read-before-edit, validation, Android compatibility, and Astra-first priorities.
 - The adapter is intentionally additive. Codex/Astra may ignore this section and continue loading the existing skills normally.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as GitHub issues in `CometDash77/SmartTube-AI` (external PRs are not a triage surface; every `gh` operation passes `-R CometDash77/SmartTube-AI`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles map one-to-one to `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human` and `wontfix`; the wayfinder labels are `wayfinder:map|research|prototype|grilling|task`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain docs use a **multi-context** layout — a root `CONTEXT-MAP.md` pointing at one `CONTEXT.md` per subproject (`common/`, `smarttubetv/`) — and none of those files exist yet. See `docs/agents/domain.md`.
